@@ -1165,7 +1165,7 @@ function createProgressReporter({ message, channelState }) {
   };
 
   const render = (status = 'running') => {
-    const elapsed = humanAge(Math.max(0, Date.now() - startedAt));
+    const elapsed = humanElapsed(Math.max(0, Date.now() - startedAt));
     const phase = channelState.activeRun?.phase || 'starting';
     const hint = status === 'running'
       ? `可用 \`!abort\` / \`${slashRef('cancel')}\` 中断，\`!progress\` 查看详情。`
@@ -1250,7 +1250,7 @@ function createProgressReporter({ message, channelState }) {
     syncActiveRun();
     if (!progressMessage) return;
 
-    const elapsed = humanAge(Math.max(0, Date.now() - startedAt));
+    const elapsed = humanElapsed(Math.max(0, Date.now() - startedAt));
     const status = cancelled
       ? '🛑 **任务已中断**'
       : ok
@@ -2360,4 +2360,15 @@ function humanAge(ms) {
   if (h < 24) return `${h}h`;
   const d = Math.floor(h / 24);
   return `${d}d`;
+}
+
+function humanElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m ${s % 60}s`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h ${m % 60}m ${s % 60}s`;
 }
