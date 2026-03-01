@@ -1,6 +1,6 @@
 {
   "name": "codex-cli-discord",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A tiny Discord bot that bridges Codex CLI (codex exec --json) into Discord threads.",
   "license": "MIT",
   "author": "ATou",
