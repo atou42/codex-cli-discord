@@ -6,6 +6,21 @@ import path from 'node:path';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { safeReply } from './discord-reply-utils.js';
+import {
+  appendRecentActivity as appendRecentActivityBase,
+  appendCompletedStep as appendCompletedStepBase,
+  cloneProgressPlan as cloneProgressPlanBase,
+  extractCompletedStepFromEvent as extractCompletedStepFromEventBase,
+  extractPlanStateFromEvent as extractPlanStateFromEventBase,
+  renderRecentActivitiesLines as renderRecentActivitiesLinesBase,
+  formatProgressPlanSummary as formatProgressPlanSummaryBase,
+  renderProgressPlanLines as renderProgressPlanLinesBase,
+  summarizeCodexEvent as summarizeCodexEventBase,
+} from './progress-utils.js';
+import {
+  formatCompletedMilestonesSummary,
+  renderCompletedMilestonesLines,
+} from './progress-milestones.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -97,9 +112,11 @@ const PROGRESS_UPDATES_ENABLED = String(process.env.PROGRESS_UPDATES_ENABLED || 
 const PROGRESS_UPDATE_INTERVAL_MS = normalizeIntervalMs(process.env.PROGRESS_UPDATE_INTERVAL_MS, 15000, 3000);
 const PROGRESS_EVENT_FLUSH_MS = normalizeIntervalMs(process.env.PROGRESS_EVENT_FLUSH_MS, 5000, 1000);
 const PROGRESS_TEXT_PREVIEW_CHARS = Math.max(60, toInt(process.env.PROGRESS_TEXT_PREVIEW_CHARS, 140));
+const PROGRESS_INCLUDE_STDOUT = String(process.env.PROGRESS_INCLUDE_STDOUT || 'true').toLowerCase() !== 'false';
 const PROGRESS_INCLUDE_STDERR = String(process.env.PROGRESS_INCLUDE_STDERR || 'false').toLowerCase() === 'true';
 const PROGRESS_PLAN_MAX_LINES = Math.min(8, Math.max(1, toInt(process.env.PROGRESS_PLAN_MAX_LINES, 4)));
 const PROGRESS_DONE_STEPS_MAX = Math.min(12, Math.max(1, toInt(process.env.PROGRESS_DONE_STEPS_MAX, 4)));
+const PROGRESS_ACTIVITY_MAX_LINES = Math.min(12, Math.max(1, toInt(process.env.PROGRESS_ACTIVITY_MAX_LINES, 4)));
 const PROGRESS_MESSAGE_MAX_CHARS = Math.max(600, toInt(process.env.PROGRESS_MESSAGE_MAX_CHARS, 1800));
 const SELF_HEAL_ENABLED = String(process.env.SELF_HEAL_ENABLED || 'true').toLowerCase() !== 'false';
 const SELF_HEAL_RESTART_DELAY_MS = toInt(process.env.SELF_HEAL_RESTART_DELAY_MS, 5000);
@@ -399,42 +416,8 @@ async function handleInteractionCreate(interaction) {
   try {
     switch (cmd) {
       case 'status': {
-        const wd = ensureWorkspace(session, key);
-        const defaults = getCodexDefaults();
-        const codexHealth = getCodexCliHealth();
-        const runtime = getRuntimeSnapshot(key);
-        const security = resolveSecurityContext(interaction.channel);
-        const modeDesc = session.mode === 'dangerous'
-          ? 'dangerous (无沙盒, 全权限)'
-          : 'safe (沙盒隔离, 无网络)';
-        const sessionLabel = session.name
-          ? `**${session.name}** (\`${session.codexThreadId || 'auto'}\`)`
-          : `\`${session.codexThreadId || '(auto — 下条消息新建)'}\``;
         await interaction.reply({
-          content: [
-            '🧭 **当前配置**',
-            `• workspace: \`${wd}\``,
-            `• mode: ${modeDesc}`,
-            `• model: ${session.model || `${defaults.model} _(config.toml)_`}`,
-            `• effort: ${session.effort || `${defaults.effort} _(config.toml)_`}`,
-            `• codex-cli: ${formatCodexHealth(codexHealth)}`,
-            `• session: ${sessionLabel}`,
-            `• last input tokens: ${formatTokenValue(session.lastInputTokens)}`,
-            `• runtime: ${formatRuntimeLabel(runtime)}`,
-            `• queued prompts: ${runtime.queued}`,
-            `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-            runtime.progressText ? `• latest progress: ${runtime.progressText}` : null,
-            `• security profile: ${formatSecurityProfileDisplay(security)}`,
-            `• mention only: ${security.mentionOnly ? 'on' : 'off'}`,
-            `• !config: ${formatConfigCommandStatus()}`,
-            `• codex timeout: ${formatTimeoutLabel(CODEX_TIMEOUT_MS)}`,
-            `• compact strategy: ${describeCompactStrategy(COMPACT_STRATEGY)}`,
-            `• compact trigger: ${COMPACT_ON_THRESHOLD ? 'on' : 'off'}`,
-            `• compact threshold: ${MAX_INPUT_TOKENS_BEFORE_COMPACT}`,
-            COMPACT_STRATEGY === 'native' && COMPACT_ON_THRESHOLD
-              ? `• native auto compact limit: ${MODEL_AUTO_COMPACT_TOKEN_LIMIT} (model_auto_compact_token_limit)`
-              : null,
-          ].filter(Boolean).join('\n'),
+          content: formatStatusReport(key, session, interaction.channel),
           flags: 64,
         });
         break;
@@ -550,7 +533,7 @@ async function handleInteractionCreate(interaction) {
 
       case 'progress': {
         await interaction.reply({
-          content: formatProgressReport(key),
+          content: formatProgressReport(key, interaction.channel),
           flags: 64,
         });
         break;
@@ -840,38 +823,7 @@ async function handleCommand(message, key, content) {
     }
 
     case '!status': {
-      const workspaceDir = ensureWorkspace(session, key);
-      const defaults = getCodexDefaults();
-      const codexHealth = getCodexCliHealth();
-      const runtime = getRuntimeSnapshot(key);
-      const modeDesc = session.mode === 'dangerous'
-        ? 'dangerous (无沙盒, 全权限)'
-        : 'safe (沙盒隔离, 无网络)';
-      await safeReply(message, [
-        '🧭 **当前配置**',
-        `• workspace: \`${workspaceDir}\``,
-        `• mode: ${modeDesc}`,
-        `• model: ${session.model || `${defaults.model} _(config.toml)_`}`,
-        `• effort: ${session.effort || `${defaults.effort} _(config.toml)_`}`,
-        `• codex-cli: ${formatCodexHealth(codexHealth)}`,
-        `• codex session: \`${session.codexThreadId || '(none)'}\``,
-        `• last input tokens: ${formatTokenValue(session.lastInputTokens)}`,
-        `• runtime: ${formatRuntimeLabel(runtime)}`,
-        `• queued prompts: ${runtime.queued}`,
-        `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-        runtime.progressText ? `• latest progress: ${runtime.progressText}` : null,
-        `• security profile: ${formatSecurityProfileDisplay(security)}`,
-        `• mention only: ${security.mentionOnly ? 'on' : 'off'}`,
-        `• !config: ${formatConfigCommandStatus()}`,
-        `• codex timeout: ${formatTimeoutLabel(CODEX_TIMEOUT_MS)}`,
-        `• compact strategy: ${describeCompactStrategy(COMPACT_STRATEGY)}`,
-        `• compact trigger: ${COMPACT_ON_THRESHOLD ? 'on' : 'off'}`,
-        `• compact threshold: ${MAX_INPUT_TOKENS_BEFORE_COMPACT}`,
-        COMPACT_STRATEGY === 'native' && COMPACT_ON_THRESHOLD
-          ? `• native auto compact limit: ${MODEL_AUTO_COMPACT_TOKEN_LIMIT} (model_auto_compact_token_limit)`
-          : null,
-        session.configOverrides?.length ? `• extra config: ${session.configOverrides.join(', ')}` : null,
-      ].filter(Boolean).join('\n'));
+      await safeReply(message, formatStatusReport(key, session, message.channel));
       break;
     }
 
@@ -893,7 +845,7 @@ async function handleCommand(message, key, content) {
     }
 
     case '!progress': {
-      await safeReply(message, formatProgressReport(key));
+      await safeReply(message, formatProgressReport(key, message.channel));
       break;
     }
 
@@ -1148,6 +1100,7 @@ function setActiveRun(channelState, message, prompt, child, phase = 'exec') {
     progressMessageId: prev?.progressMessageId || null,
     progressPlan: cloneProgressPlan(prev?.progressPlan),
     completedSteps: Array.isArray(prev?.completedSteps) ? [...prev.completedSteps] : [],
+    recentActivities: Array.isArray(prev?.recentActivities) ? [...prev.recentActivities] : [],
   };
 }
 
@@ -1213,6 +1166,7 @@ function getRuntimeSnapshot(key) {
     progressMessageId: active?.progressMessageId || null,
     progressPlan: cloneProgressPlan(active?.progressPlan),
     completedSteps: Array.isArray(active?.completedSteps) ? [...active.completedSteps] : [],
+    recentActivities: Array.isArray(active?.recentActivities) ? [...active.recentActivities] : [],
   };
 }
 
@@ -1230,40 +1184,119 @@ function formatTimeoutLabel(timeoutMs) {
   return `${n}ms (~${humanAge(n)})`;
 }
 
+function formatSessionStatusLabel(session) {
+  return session.name
+    ? `**${session.name}** (\`${session.codexThreadId || 'auto'}\`)`
+    : `\`${session.codexThreadId || '(auto — 下条消息新建)'}\``;
+}
+
+function formatStatusReport(key, session, channel = null) {
+  const workspaceDir = ensureWorkspace(session, key);
+  const defaults = getCodexDefaults();
+  const codexHealth = getCodexCliHealth();
+  const runtime = getRuntimeSnapshot(key);
+  const security = resolveSecurityContext(channel);
+  const modeDesc = session.mode === 'dangerous'
+    ? 'dangerous (无沙盒, 全权限)'
+    : 'safe (沙盒隔离, 无网络)';
+  const planSummary = formatProgressPlanSummary(runtime.progressPlan);
+  const completedSummary = formatCompletedStepsSummary(runtime.completedSteps, {
+    planState: runtime.progressPlan,
+    latestStep: runtime.progressText,
+    maxSteps: 3,
+  });
+
+  return [
+    '🧭 **当前配置**',
+    `• channel id: \`${key}\``,
+    channel?.name ? `• channel: ${channel.name}` : null,
+    `• workspace: \`${workspaceDir}\``,
+    `• mode: ${modeDesc}`,
+    `• model: ${session.model || `${defaults.model} _(config.toml)_`}`,
+    `• effort: ${session.effort || `${defaults.effort} _(config.toml)_`}`,
+    `• codex-cli: ${formatCodexHealth(codexHealth)}`,
+    `• session: ${formatSessionStatusLabel(session)}`,
+    `• last input tokens: ${formatTokenValue(session.lastInputTokens)}`,
+    `• runtime: ${formatRuntimeLabel(runtime)}`,
+    `• queued prompts: ${runtime.queued}`,
+    `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
+    `• progress events: ${runtime.progressEvents}`,
+    runtime.progressText ? `• latest activity: ${runtime.progressText}` : null,
+    ...renderRecentActivitiesLines(runtime.recentActivities, Math.min(PROGRESS_ACTIVITY_MAX_LINES, 4)),
+    planSummary ? `• plan: ${planSummary}` : null,
+    completedSummary ? `• completed milestones: ${completedSummary}` : null,
+    runtime.progressAgoMs !== null ? `• progress updated: ${humanAge(runtime.progressAgoMs)} ago` : null,
+    runtime.messageId ? `• active message id: \`${runtime.messageId}\`` : null,
+    runtime.progressMessageId ? `• progress message id: \`${runtime.progressMessageId}\`` : null,
+    `• security profile: ${formatSecurityProfileDisplay(security)}`,
+    `• mention only: ${security.mentionOnly ? 'on' : 'off'}`,
+    `• !config: ${formatConfigCommandStatus()}`,
+    `• config allowlist: ${describeConfigPolicy()}`,
+    `• codex timeout: ${formatTimeoutLabel(CODEX_TIMEOUT_MS)}`,
+    `• compact strategy: ${describeCompactStrategy(COMPACT_STRATEGY)}`,
+    `• compact trigger: ${COMPACT_ON_THRESHOLD ? 'on' : 'off'}`,
+    `• compact threshold: ${MAX_INPUT_TOKENS_BEFORE_COMPACT}`,
+    COMPACT_STRATEGY === 'native' && COMPACT_ON_THRESHOLD
+      ? `• native auto compact limit: ${MODEL_AUTO_COMPACT_TOKEN_LIMIT} (model_auto_compact_token_limit)`
+      : null,
+    session.configOverrides?.length ? `• extra config: ${session.configOverrides.join(', ')}` : null,
+    `• bot pid: ${process.pid}`,
+    `• bot uptime: ${humanAge(Math.max(0, Math.floor(process.uptime() * 1000)))}`,
+  ].filter(Boolean).join('\n');
+}
+
 function formatQueueReport(key, channel = null) {
   const runtime = getRuntimeSnapshot(key);
   const security = resolveSecurityContext(channel);
   const planSummary = formatProgressPlanSummary(runtime.progressPlan);
-  const completedSummary = formatCompletedStepsSummary(runtime.completedSteps, 3);
+  const completedSummary = formatCompletedStepsSummary(runtime.completedSteps, {
+    planState: runtime.progressPlan,
+    latestStep: runtime.progressText,
+    maxSteps: 3,
+  });
   return [
     '📮 **任务队列状态**',
     `• runtime: ${formatRuntimeLabel(runtime)}`,
     `• queued prompts: ${runtime.queued}`,
     `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-    runtime.progressText ? `• latest step: ${runtime.progressText}` : null,
+    runtime.progressText ? `• latest activity: ${runtime.progressText}` : null,
+    ...renderRecentActivitiesLines(runtime.recentActivities, Math.min(PROGRESS_ACTIVITY_MAX_LINES, 3)),
     planSummary ? `• plan: ${planSummary}` : null,
-    completedSummary ? `• completed steps: ${completedSummary}` : null,
+    completedSummary ? `• completed milestones: ${completedSummary}` : null,
     runtime.progressAgoMs !== null ? `• progress updated: ${humanAge(runtime.progressAgoMs)} ago` : null,
     runtime.messageId ? `• active message id: \`${runtime.messageId}\`` : null,
     runtime.progressMessageId ? `• progress message id: \`${runtime.progressMessageId}\`` : null,
   ].filter(Boolean).join('\n');
 }
 
-function formatProgressReport(key) {
+function formatProgressReport(key, channel = null) {
   const runtime = getRuntimeSnapshot(key);
+  const security = resolveSecurityContext(channel);
   if (!runtime.running) {
-    return 'ℹ️ 当前没有运行中的任务。';
+    return [
+      'ℹ️ 当前没有运行中的任务。',
+      `• queued prompts: ${runtime.queued}`,
+      `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
+      `• hint: 发送新任务后可用 \`!progress\` / \`${slashRef('progress')}\` 查看实时进度。`,
+    ].join('\n');
   }
   return [
     '🧵 **任务进度**',
     `• runtime: ${formatRuntimeLabel(runtime)}`,
     `• event count: ${runtime.progressEvents}`,
-    runtime.progressText ? `• latest step: ${runtime.progressText}` : null,
+    runtime.progressText ? `• latest activity: ${runtime.progressText}` : null,
+    ...renderRecentActivitiesLines(runtime.recentActivities, PROGRESS_ACTIVITY_MAX_LINES),
     ...renderProgressPlanLines(runtime.progressPlan, PROGRESS_PLAN_MAX_LINES),
-    ...renderCompletedStepsLines(runtime.completedSteps, PROGRESS_DONE_STEPS_MAX),
+    ...renderCompletedStepsLines(runtime.completedSteps, {
+      planState: runtime.progressPlan,
+      latestStep: runtime.progressText,
+      maxSteps: PROGRESS_DONE_STEPS_MAX,
+    }),
     runtime.progressAgoMs !== null ? `• last update: ${humanAge(runtime.progressAgoMs)} ago` : null,
+    runtime.messageId ? `• active message id: \`${runtime.messageId}\`` : null,
     runtime.progressMessageId ? `• progress message id: \`${runtime.progressMessageId}\`` : null,
     `• queued prompts: ${runtime.queued}`,
+    `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
     `• hint: 可用 \`!abort\` / \`${slashRef('cancel')}\` 中断当前任务并清空队列。`,
   ].filter(Boolean).join('\n');
 }
@@ -1533,6 +1566,9 @@ function createProgressReporter({ message, channelState }) {
   const completedSteps = Array.isArray(channelState.activeRun?.completedSteps)
     ? [...channelState.activeRun.completedSteps]
     : [];
+  const recentActivities = Array.isArray(channelState.activeRun?.recentActivities)
+    ? [...channelState.activeRun.recentActivities]
+    : [];
   let isEmitting = false;
   let rerunEmit = false;
 
@@ -1543,6 +1579,7 @@ function createProgressReporter({ message, channelState }) {
     channelState.activeRun.lastProgressAt = Date.now();
     channelState.activeRun.progressPlan = cloneProgressPlan(planState);
     channelState.activeRun.completedSteps = [...completedSteps];
+    channelState.activeRun.recentActivities = [...recentActivities];
     if (progressMessage?.id) {
       channelState.activeRun.progressMessageId = progressMessage.id;
     }
@@ -1559,9 +1596,14 @@ function createProgressReporter({ message, channelState }) {
       `• elapsed: ${elapsed}`,
       `• phase: ${phase}`,
       `• event count: ${events}`,
-      `• latest step: ${latestStep}`,
+      `• latest activity: ${latestStep}`,
+      ...renderRecentActivitiesLines(recentActivities, PROGRESS_ACTIVITY_MAX_LINES),
       ...renderProgressPlanLines(planState, PROGRESS_PLAN_MAX_LINES),
-      ...renderCompletedStepsLines(completedSteps, PROGRESS_DONE_STEPS_MAX),
+      ...renderCompletedStepsLines(completedSteps, {
+        planState,
+        latestStep,
+        maxSteps: PROGRESS_DONE_STEPS_MAX,
+      }),
       `• queued prompts: ${channelState.queue.length}`,
       `• hint: ${hint}`,
     ]
@@ -1619,6 +1661,7 @@ function createProgressReporter({ message, channelState }) {
     if (stopped) return;
     events += 1;
     latestStep = summarizeCodexEvent(ev);
+    appendRecentActivity(recentActivities, latestStep);
     const nextPlan = extractPlanStateFromEvent(ev);
     if (nextPlan) {
       planState = nextPlan;
@@ -1636,9 +1679,11 @@ function createProgressReporter({ message, channelState }) {
 
   const onLog = (line, source) => {
     if (stopped) return;
-    if (!PROGRESS_INCLUDE_STDERR || source !== 'stderr') return;
+    if (source === 'stderr' && !PROGRESS_INCLUDE_STDERR) return;
+    if (source === 'stdout' && !PROGRESS_INCLUDE_STDOUT) return;
     events += 1;
-    latestStep = `stderr: ${truncate(String(line || '').replace(/\s+/g, ' ').trim(), PROGRESS_TEXT_PREVIEW_CHARS)}`;
+    latestStep = `${source}: ${truncate(String(line || '').replace(/\s+/g, ' ').trim(), PROGRESS_TEXT_PREVIEW_CHARS)}`;
+    appendRecentActivity(recentActivities, latestStep);
     syncActiveRun();
     void emit(false);
   };
@@ -1663,9 +1708,14 @@ function createProgressReporter({ message, channelState }) {
       `• elapsed: ${elapsed}`,
       `• phase: ${channelState.activeRun?.phase || 'done'}`,
       `• event count: ${events}`,
-      `• latest step: ${latestStep}`,
+      `• latest activity: ${latestStep}`,
+      ...renderRecentActivitiesLines(recentActivities, PROGRESS_ACTIVITY_MAX_LINES),
       ...renderProgressPlanLines(planState, PROGRESS_PLAN_MAX_LINES),
-      ...renderCompletedStepsLines(completedSteps, PROGRESS_DONE_STEPS_MAX),
+      ...renderCompletedStepsLines(completedSteps, {
+        planState,
+        latestStep,
+        maxSteps: PROGRESS_DONE_STEPS_MAX,
+      }),
       !ok && !cancelled && error ? `• error: ${truncate(String(error), 260)}` : null,
     ]
       .filter(Boolean)
@@ -1688,280 +1738,71 @@ function createProgressReporter({ message, channelState }) {
 }
 
 function summarizeCodexEvent(ev) {
-  if (!ev || typeof ev !== 'object') return '收到执行事件';
-
-  const type = String(ev.type || '').trim();
-  if (!type) return '收到执行事件';
-
-  switch (type) {
-    case 'thread.started':
-      return ev.thread_id ? `session started: ${ev.thread_id}` : 'session started';
-    case 'turn.started':
-      return 'turn started';
-    case 'turn.completed': {
-      const input = extractInputTokensFromUsage(ev.usage);
-      return input === null ? 'turn completed' : `turn completed (input tokens: ${input})`;
-    }
-    case 'error': {
-      let detail = '';
-      if (typeof ev.error === 'string') {
-        detail = ev.error;
-      } else {
-        try {
-          detail = JSON.stringify(ev.error);
-        } catch {
-          detail = String(ev.error || 'unknown');
-        }
-      }
-      return `error: ${truncate(String(detail || 'unknown'), PROGRESS_TEXT_PREVIEW_CHARS)}`;
-    }
-    case 'item.started':
-    case 'item.completed': {
-      const item = ev.item || {};
-      const itemType = String(item.type || 'item');
-      const action = type === 'item.started' ? 'started' : 'completed';
-
-      if (itemType === 'agent_message') {
-        const preview = extractEventTextPreview(item);
-        return preview ? `agent message ${action}: ${preview}` : `agent message ${action}`;
-      }
-
-      if (itemType === 'reasoning') {
-        if (!SHOW_REASONING) return `reasoning ${action}`;
-        const preview = extractEventTextPreview(item);
-        return preview ? `reasoning ${action}: ${preview}` : `reasoning ${action}`;
-      }
-
-      const toolName = extractItemToolName(item);
-      if (toolName) return `tool ${toolName} ${action}`;
-      if (itemType.includes('tool')) return `${itemType} ${action}`;
-      return `${itemType} ${action}`;
-    }
-    default:
-      return type;
-  }
-}
-
-function extractEventTextPreview(item) {
-  const raw = typeof item?.text === 'string'
-    ? item.text
-    : Array.isArray(item?.content)
-      ? item.content.map((x) => (typeof x?.text === 'string' ? x.text : '')).join(' ')
-      : '';
-  const normalized = String(raw || '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return '';
-  return truncate(normalized, PROGRESS_TEXT_PREVIEW_CHARS);
-}
-
-function extractItemToolName(item) {
-  if (!item || typeof item !== 'object') return null;
-  const raw = item.tool_name || item.name || item.call?.name || item.tool?.name || null;
-  const normalized = String(raw || '').trim();
-  return normalized || null;
+  return summarizeCodexEventBase(ev, {
+    showReasoning: SHOW_REASONING,
+    previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
+  });
 }
 
 function cloneProgressPlan(planState) {
-  if (!planState || typeof planState !== 'object' || !Array.isArray(planState.steps)) return null;
-  const steps = planState.steps
-    .map((item) => ({
-      status: normalizePlanStatus(item?.status),
-      step: truncate(String(item?.step || '').replace(/\s+/g, ' ').trim(), PROGRESS_TEXT_PREVIEW_CHARS),
-    }))
-    .filter((item) => item.step);
-  if (!steps.length) return null;
-
-  const completed = steps.filter((item) => item.status === 'completed').length;
-  const inProgress = steps.filter((item) => item.status === 'in_progress').length;
-  return {
-    explanation: truncate(String(planState.explanation || '').replace(/\s+/g, ' ').trim(), PROGRESS_TEXT_PREVIEW_CHARS),
-    steps,
-    total: steps.length,
-    completed,
-    inProgress,
-  };
-}
-
-function normalizePlanStatus(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw) return 'pending';
-  if (['completed', 'complete', 'done', 'finished', 'success', 'ok'].includes(raw)) return 'completed';
-  if (['in_progress', 'in-progress', 'progress', 'running', 'active', 'doing', 'current'].includes(raw)) return 'in_progress';
-  if (['pending', 'todo', 'not_started', 'queued', 'planned', 'next'].includes(raw)) return 'pending';
-  return 'pending';
-}
-
-function parseJsonMaybe(value) {
-  const text = String(value || '').trim();
-  if (!text) return null;
-  if (!(text.startsWith('{') || text.startsWith('['))) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function normalizePlanEntries(raw) {
-  if (!Array.isArray(raw)) return [];
-  const out = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const step = String(
-      item.step || item.title || item.task || item.name || item.label || '',
-    ).replace(/\s+/g, ' ').trim();
-    if (!step) continue;
-    out.push({
-      status: normalizePlanStatus(item.status || item.state || item.phase),
-      step: truncate(step, PROGRESS_TEXT_PREVIEW_CHARS),
-    });
-  }
-  return out;
-}
-
-function buildPlanStateFromUnknown(raw, depth = 0) {
-  if (depth > 3 || raw === null || raw === undefined) return null;
-
-  if (typeof raw === 'string') {
-    const parsed = parseJsonMaybe(raw);
-    return parsed ? buildPlanStateFromUnknown(parsed, depth + 1) : null;
-  }
-
-  if (Array.isArray(raw)) {
-    const direct = normalizePlanEntries(raw);
-    if (direct.length) return cloneProgressPlan({ explanation: '', steps: direct });
-    for (const item of raw) {
-      const nested = buildPlanStateFromUnknown(item, depth + 1);
-      if (nested) return nested;
-    }
-    return null;
-  }
-
-  if (typeof raw !== 'object') return null;
-
-  const direct = normalizePlanEntries(Array.isArray(raw.plan) ? raw.plan : raw.steps);
-  if (direct.length) {
-    return cloneProgressPlan({
-      explanation: raw.explanation || raw.summary || raw.note || '',
-      steps: direct,
-    });
-  }
-
-  const keys = ['arguments', 'input', 'output', 'result', 'data', 'payload', 'value', 'content'];
-  for (const key of keys) {
-    if (!(key in raw)) continue;
-    const nested = buildPlanStateFromUnknown(raw[key], depth + 1);
-    if (nested) return nested;
-  }
-
-  return null;
+  return cloneProgressPlanBase(planState, {
+    previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
+  });
 }
 
 function extractPlanStateFromEvent(ev) {
-  if (!ev || typeof ev !== 'object') return null;
-  const item = ev.item && typeof ev.item === 'object' ? ev.item : null;
-  const candidates = [
-    ev.plan,
-    ev.result,
-    ev.output,
-    ev.data,
-    ev.payload,
-    item?.plan,
-    item?.result,
-    item?.output,
-    item?.input,
-    item?.call?.arguments,
-    item?.call?.args,
-    item?.content,
-  ];
-
-  for (const candidate of candidates) {
-    const plan = buildPlanStateFromUnknown(candidate);
-    if (plan) return plan;
-  }
-
-  const toolName = extractItemToolName(item);
-  if (toolName && toolName.toLowerCase().includes('update_plan')) {
-    return buildPlanStateFromUnknown(item?.call?.arguments);
-  }
-  return null;
+  return extractPlanStateFromEventBase(ev, {
+    previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
+  });
 }
 
 function extractCompletedStepFromEvent(ev) {
-  if (!ev || typeof ev !== 'object') return '';
-  if (ev.type !== 'item.completed') return '';
-
-  const item = ev.item || {};
-  const itemType = String(item.type || '').trim();
-  if (!itemType || itemType === 'agent_message' || itemType === 'reasoning') return '';
-
-  const toolName = extractItemToolName(item);
-  if (toolName) {
-    if (toolName.toLowerCase().includes('update_plan')) return '';
-    return `tool ${toolName}`;
-  }
-
-  const preview = extractEventTextPreview(item);
-  if (preview) return `${itemType}: ${preview}`;
-  return `${itemType} completed`;
+  return extractCompletedStepFromEventBase(ev, {
+    previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
+  });
 }
 
 function appendCompletedStep(list, stepText) {
-  const text = String(stepText || '').replace(/\s+/g, ' ').trim();
-  if (!text) return;
+  appendCompletedStepBase(list, stepText, {
+    previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
+    doneStepsMax: PROGRESS_DONE_STEPS_MAX,
+  });
+}
 
-  const normalized = truncate(text, PROGRESS_TEXT_PREVIEW_CHARS);
-  const key = normalized.toLowerCase();
-  const existing = list.findIndex((item) => String(item || '').toLowerCase() === key);
-  if (existing >= 0) list.splice(existing, 1);
-  list.push(normalized);
-
-  const maxKeep = Math.max(PROGRESS_DONE_STEPS_MAX + 2, PROGRESS_DONE_STEPS_MAX * 3);
-  if (list.length > maxKeep) {
-    list.splice(0, list.length - maxKeep);
-  }
+function appendRecentActivity(list, activityText) {
+  appendRecentActivityBase(list, activityText, {
+    previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
+    maxSteps: PROGRESS_ACTIVITY_MAX_LINES,
+  });
 }
 
 function formatProgressPlanSummary(planState) {
-  if (!planState || !Array.isArray(planState.steps) || !planState.steps.length) return '';
-  const inProgressPart = planState.inProgress > 0 ? `, ${planState.inProgress} in progress` : '';
-  return `${planState.completed}/${planState.total} completed${inProgressPart}`;
+  return formatProgressPlanSummaryBase(planState);
 }
 
 function renderProgressPlanLines(planState, maxLines = PROGRESS_PLAN_MAX_LINES) {
-  if (!planState || !Array.isArray(planState.steps) || !planState.steps.length) return [];
-
-  const lines = [];
-  const summary = formatProgressPlanSummary(planState);
-  lines.push(summary ? `• plan: ${summary}` : '• plan: received');
-  if (planState.explanation) lines.push(`  note: ${planState.explanation}`);
-
-  const limit = Math.max(1, maxLines);
-  const visible = planState.steps.slice(0, limit);
-  for (const step of visible) {
-    const icon = step.status === 'completed'
-      ? '✓'
-      : step.status === 'in_progress'
-        ? '…'
-        : '○';
-    lines.push(`  ${icon} ${step.step}`);
-  }
-  if (planState.steps.length > visible.length) {
-    lines.push(`  … +${planState.steps.length - visible.length} more`);
-  }
-  return lines;
+  return renderProgressPlanLinesBase(planState, maxLines);
 }
 
-function formatCompletedStepsSummary(steps, maxSteps = PROGRESS_DONE_STEPS_MAX) {
-  if (!Array.isArray(steps) || !steps.length) return '';
-  const limit = Math.max(1, maxSteps);
-  const visible = steps.slice(-limit);
-  return visible.join(' | ');
+function renderRecentActivitiesLines(activities, maxLines = PROGRESS_ACTIVITY_MAX_LINES) {
+  return renderRecentActivitiesLinesBase(activities, {
+    maxSteps: Math.max(1, Number(maxLines || PROGRESS_ACTIVITY_MAX_LINES)),
+    previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
+  });
 }
 
-function renderCompletedStepsLines(steps, maxSteps = PROGRESS_DONE_STEPS_MAX) {
-  const summary = formatCompletedStepsSummary(steps, maxSteps);
-  if (!summary) return [];
-  return [`• completed steps: ${summary}`];
+function formatCompletedStepsSummary(steps, options = {}) {
+  return formatCompletedMilestonesSummary(steps, {
+    ...options,
+    maxSteps: Math.max(1, Number(options.maxSteps || PROGRESS_DONE_STEPS_MAX)),
+  });
+}
+
+function renderCompletedStepsLines(steps, options = {}) {
+  return renderCompletedMilestonesLines(steps, {
+    ...options,
+    maxSteps: Math.max(1, Number(options.maxSteps || PROGRESS_DONE_STEPS_MAX)),
+  });
 }
 
 async function handlePrompt(message, key, prompt, channelState) {
@@ -2265,7 +2106,6 @@ function spawnCodex(args, cwd, options = {}) {
     let threadId = null;
     let resolved = false;
     let timedOut = false;
-
     const timeout = CODEX_TIMEOUT_MS > 0
       ? setTimeout(() => {
         timedOut = true;
