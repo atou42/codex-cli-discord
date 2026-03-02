@@ -10,11 +10,11 @@ import {
   appendRecentActivity as appendRecentActivityBase,
   appendCompletedStep as appendCompletedStepBase,
   cloneProgressPlan as cloneProgressPlanBase,
+  extractRawProgressTextFromEvent as extractRawProgressTextFromEventBase,
   extractCompletedStepFromEvent as extractCompletedStepFromEventBase,
   extractPlanStateFromEvent as extractPlanStateFromEventBase,
   renderRecentActivitiesLines as renderRecentActivitiesLinesBase,
   formatProgressPlanSummary as formatProgressPlanSummaryBase,
-  summarizeAudienceActivity as summarizeAudienceActivityBase,
   renderProgressPlanLines as renderProgressPlanLinesBase,
   summarizeCodexEvent as summarizeCodexEventBase,
 } from './progress-utils.js';
@@ -2468,9 +2468,9 @@ function createProgressReporter({ message, channelState, language = DEFAULT_UI_L
     if (stopped) return;
     events += 1;
     latestStep = summarizeCodexEvent(ev);
-    const audienceActivity = summarizeAudienceActivity(ev);
-    if (audienceActivity) {
-      appendRecentActivity(recentActivities, audienceActivity);
+    const rawActivity = extractRawProgressTextFromEvent(ev);
+    if (rawActivity) {
+      appendRecentActivity(recentActivities, rawActivity);
     }
     const nextPlan = extractPlanStateFromEvent(ev);
     if (nextPlan) {
@@ -2557,11 +2557,8 @@ function summarizeCodexEvent(ev) {
   });
 }
 
-function summarizeAudienceActivity(ev) {
-  return summarizeAudienceActivityBase(ev, {
-    showReasoning: SHOW_REASONING,
-    previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
-  });
+function extractRawProgressTextFromEvent(ev) {
+  return extractRawProgressTextFromEventBase(ev);
 }
 
 function cloneProgressPlan(planState) {
@@ -2593,6 +2590,8 @@ function appendRecentActivity(list, activityText) {
   appendRecentActivityBase(list, activityText, {
     previewChars: PROGRESS_TEXT_PREVIEW_CHARS,
     maxSteps: PROGRESS_ACTIVITY_MAX_LINES,
+    truncateText: false,
+    preserveWhitespace: true,
   });
 }
 

@@ -5,9 +5,9 @@ import {
   appendRecentActivity,
   appendCompletedStep,
   extractCompletedStepFromEvent,
+  extractRawProgressTextFromEvent,
   extractPlanStateFromEvent,
   renderRecentActivitiesLines,
-  summarizeAudienceActivity,
   summarizeCodexEvent,
 } from '../src/progress-utils.js';
 
@@ -132,27 +132,27 @@ test('renderRecentActivitiesLines renders latest activity window', () => {
   ]);
 });
 
-test('summarizeAudienceActivity filters low-signal web search completion events', () => {
+test('extractRawProgressTextFromEvent ignores low-signal web_search completion events', () => {
   const ev = {
     type: 'web_search_completed',
     query: 'OpenAI Codex CLI release notes',
   };
 
-  const summary = summarizeAudienceActivity(ev, { previewChars: 180 });
-  assert.equal(summary, '');
+  const raw = extractRawProgressTextFromEvent(ev);
+  assert.equal(raw, '');
 });
 
-test('summarizeAudienceActivity keeps output_text delta content for audience stream', () => {
+test('extractRawProgressTextFromEvent keeps raw output_text delta text', () => {
   const ev = {
     type: 'response.output_text.delta',
-    delta: '正在核对配置并准备提交修复',
+    delta: '正在核对配置并准备提交修复，不做摘要模板转换。',
   };
 
-  const summary = summarizeAudienceActivity(ev, { previewChars: 180 });
-  assert.equal(summary, 'agent message: 正在核对配置并准备提交修复');
+  const raw = extractRawProgressTextFromEvent(ev);
+  assert.equal(raw, '正在核对配置并准备提交修复，不做摘要模板转换。');
 });
 
-test('summarizeAudienceActivity suppresses agent message completed snapshot events', () => {
+test('extractRawProgressTextFromEvent suppresses final agent_message completed snapshots', () => {
   const ev = {
     type: 'item_completed',
     item: {
@@ -161,6 +161,20 @@ test('summarizeAudienceActivity suppresses agent message completed snapshot even
     },
   };
 
-  const summary = summarizeAudienceActivity(ev, { previewChars: 180 });
-  assert.equal(summary, '');
+  const raw = extractRawProgressTextFromEvent(ev);
+  assert.equal(raw, '');
+});
+
+test('appendRecentActivity can keep full raw text without truncation', () => {
+  const list = [];
+  const rawText = '这是一段用于验证不截断行为的原始过程文本 '.repeat(12).trim();
+  appendRecentActivity(list, rawText, {
+    maxSteps: 3,
+    previewChars: 60,
+    truncateText: false,
+    preserveWhitespace: true,
+  });
+
+  assert.equal(list.length, 1);
+  assert.equal(list[0], rawText);
 });

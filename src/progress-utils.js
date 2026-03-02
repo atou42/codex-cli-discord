@@ -269,23 +269,6 @@ function summarizeResponseItem(payload, options = {}) {
   return '';
 }
 
-function isLowSignalAudienceSummary(summaryText) {
-  const text = normalizeWhitespace(summaryText).toLowerCase();
-  if (!text) return true;
-
-  if (/^agent message (started|completed)(:|$)/.test(text)) return true;
-  if (text === 'agent message delta') return true;
-  if (/^reasoning(\s|$)/.test(text)) return true;
-  if (/^web search(\s|$)/.test(text)) return true;
-  if (/^turn (started|completed)(\s|$)/.test(text)) return true;
-  if (/^session started(\s|$)/.test(text)) return true;
-  if (/^command (started|completed|updated)(:|$)/.test(text)) return true;
-  if (/^tool(\s|$)/.test(text)) return true;
-  if (/^item(\s|$)/.test(text)) return true;
-
-  return false;
-}
-
 export function summarizeCodexEvent(ev, options = {}) {
   const previewChars = Math.max(60, Number(options.previewChars || DEFAULT_PREVIEW_CHARS));
   const showReasoning = Boolean(options.showReasoning);
@@ -398,51 +381,85 @@ export function summarizeCodexEvent(ev, options = {}) {
   return prettifyEventType(rawType);
 }
 
-export function summarizeAudienceActivity(ev, options = {}) {
+function pickFirstRawText(values) {
+  if (!Array.isArray(values)) return '';
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const text = value.replace(/\r/g, '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function pickFirstRawTextFromContent(content) {
+  if (!Array.isArray(content)) return '';
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    const text = pickFirstRawText([
+      part.delta,
+      part.text,
+      part.output_text,
+      part.input_text,
+      part.reasoning_text,
+    ]);
+    if (text) return text;
+  }
+  return '';
+}
+
+export function extractRawProgressTextFromEvent(ev) {
   if (!ev || typeof ev !== 'object') return '';
   const type = normalizeEventType(ev.type || '');
   const payload = extractEventPayload(ev);
   const item = ev.item && typeof ev.item === 'object' ? ev.item : null;
 
-  if (type === 'thread_started' || type === 'turn_started' || type === 'turn_completed') {
-    return '';
+  if (type.endsWith('_delta')) {
+    const text = pickFirstRawText([
+      ev.delta,
+      ev.text_delta,
+      ev.output_text_delta,
+      ev.reasoning_delta,
+      payload?.delta,
+      payload?.text_delta,
+      payload?.output_text_delta,
+      payload?.reasoning_delta,
+      payload?.text,
+    ]) || pickFirstRawTextFromContent(payload?.content);
+    return text || '';
   }
-  if (type.startsWith('web_search_') || type.startsWith('exec_command_')) {
+
+  if (type === 'item_completed' || type === 'item_started') {
+    const itemType = normalizeEventType(item?.type || '');
+    if (itemType === 'agent_message') return '';
+    if (itemType === 'reasoning') {
+      const text = pickFirstRawText([item?.text]) || pickFirstRawTextFromContent(item?.content);
+      if (text) return text;
+    }
+    if (itemType === 'message') {
+      const text = pickFirstRawTextFromContent(item?.content);
+      if (text) return text;
+    }
     return '';
   }
 
   if (type === 'response_item' && payload && typeof payload === 'object') {
     const payloadType = normalizeEventType(payload.type || '');
-    if ([
-      'message',
-      'reasoning',
-      'web_search_call',
-      'local_shell_call',
-      'function_call',
-      'custom_tool_call',
-    ].includes(payloadType)) {
+    if (payloadType === 'reasoning') {
+      const text = pickFirstRawText([payload.text]) || pickFirstRawTextFromContent(payload.content);
+      if (text) return text;
+      return '';
+    }
+    if (payloadType === 'message') {
+      const text = pickFirstRawTextFromContent(payload.content);
+      if (text) return text;
+      return '';
+    }
+    if (payloadType === 'agent_message') {
       return '';
     }
   }
 
-  if (type === 'item_started' || type === 'item_completed') {
-    const itemType = normalizeEventType(item?.type || '');
-    if ([
-      'agent_message',
-      'reasoning',
-      'web_search_call',
-      'local_shell_call',
-      'function_call',
-      'custom_tool_call',
-    ].includes(itemType)) {
-      return '';
-    }
-  }
-
-  const summary = summarizeCodexEvent(ev, options);
-  if (!summary) return '';
-  if (isLowSignalAudienceSummary(summary)) return '';
-  return summary;
+  return '';
 }
 
 export function extractEventTextPreview(item, options = {}) {
@@ -686,7 +703,7 @@ export function appendCompletedStep(list, stepText, options = {}) {
 
   const normalized = truncate(text, previewChars);
   const key = normalized.toLowerCase();
-  const existing = list.findIndex((item) => String(item || '').toLowerCase() === key);
+  const existing = list.findIndex((item) => normalizeWhitespace(String(item || '')).toLowerCase() === key);
   if (existing >= 0) list.splice(existing, 1);
   list.push(normalized);
 
@@ -700,11 +717,15 @@ export function appendRecentActivity(list, activityText, options = {}) {
   if (!Array.isArray(list)) return;
   const previewChars = Math.max(60, Number(options.previewChars || DEFAULT_PREVIEW_CHARS));
   const maxSteps = Math.max(1, Number(options.maxSteps || DEFAULT_ACTIVITY_MAX));
-  const text = normalizeWhitespace(activityText);
+  const preserveWhitespace = options.preserveWhitespace === true;
+  const truncateText = options.truncateText !== false;
+  const text = preserveWhitespace
+    ? String(activityText || '').replace(/\r/g, '').trim()
+    : normalizeWhitespace(activityText);
   if (!text) return;
 
-  const normalized = truncate(text, previewChars);
-  const key = normalized.toLowerCase();
+  const normalized = truncateText ? truncate(text, previewChars) : text;
+  const key = normalizeWhitespace(normalized).toLowerCase();
   const existing = list.findIndex((item) => String(item || '').toLowerCase() === key);
   if (existing >= 0) list.splice(existing, 1);
   list.push(normalized);
