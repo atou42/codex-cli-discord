@@ -60,6 +60,43 @@ export function createRunnerExecutor({
       timeoutMs,
     });
 
+    if (normalizeProvider(provider) === 'claude' && shouldAutoRecoverClaudeResult(result)) {
+      const recoverySessionId = result.threadId || getSessionId(session);
+      if (recoverySessionId) {
+        const recoverySession = {
+          ...session,
+          runnerSessionId: recoverySessionId,
+          codexThreadId: recoverySessionId,
+        };
+        const recoveryArgs = buildSessionRunnerArgs({
+          provider,
+          session: recoverySession,
+          workspaceDir,
+          prompt: buildClaudeRecoveryPrompt(),
+          additionalWorkspaceDirs,
+        });
+        const recovered = await spawnRunner({ provider, args: recoveryArgs, cwd: workspaceDir, workspaceDir }, {
+          onSpawn,
+          wasCancelled,
+          onEvent,
+          onLog,
+          timeoutMs,
+        });
+
+        if (recovered.ok && hasVisibleAssistantText(recovered) && !shouldAutoRecoverClaudeResult(recovered)) {
+          return {
+            ...recovered,
+            notes: [...notes, '检测到 Claude 子代理提前返回，已自动续跑一次。'],
+          };
+        }
+
+        return {
+          ...result,
+          notes: [...notes, '检测到 Claude 子代理提前返回，已尝试自动续跑一次，但没有拿到更完整结果。'],
+        };
+      }
+    }
+
     return {
       ...result,
       notes,
@@ -147,6 +184,10 @@ export function createRunnerExecutor({
       const finalAnswerMessages = [];
       const reasonings = [];
       const logs = [];
+      const meta = {
+        claudeSawAgentToolUse: false,
+        claudeStopReason: '',
+      };
       let usage = null;
       let threadId = null;
       let resolved = false;
@@ -227,11 +268,14 @@ export function createRunnerExecutor({
       };
 
       const handleEvent = (ev) => {
-        const state = { messages, finalAnswerMessages, reasonings, logs, usage, threadId };
+        const state = { messages, finalAnswerMessages, reasonings, logs, usage, threadId, meta };
         if (normalizeProvider(provider) === 'claude') {
           handleClaudeRunnerEvent(ev, state, ensureSessionBridge);
         } else {
-          handleCodexRunnerEvent(ev, state, ensureSessionBridge);
+          handleCodexRunnerEvent(ev, state, ensureSessionBridge, {
+            extractAgentMessageText,
+            isFinalAnswerLikeAgentMessage,
+          });
         }
         usage = state.usage;
         threadId = state.threadId;
@@ -260,6 +304,7 @@ export function createRunnerExecutor({
           reasonings,
           usage,
           threadId,
+          meta,
         });
       });
 
@@ -278,6 +323,7 @@ export function createRunnerExecutor({
           reasonings,
           usage,
           threadId,
+          meta,
         });
       });
     });
@@ -289,13 +335,34 @@ export function createRunnerExecutor({
   };
 }
 
-function handleCodexRunnerEvent(ev, state, ensureSessionBridge) {
+function handleCodexRunnerEvent(ev, state, ensureSessionBridge, {
+  extractAgentMessageText,
+  isFinalAnswerLikeAgentMessage,
+} = {}) {
   switch (ev.type) {
+    case 'thread.started':
     case 'thread.created':
     case 'thread.resumed':
       state.threadId = ev.thread_id || state.threadId;
       if (state.threadId) ensureSessionBridge(state.threadId);
       break;
+    case 'item.completed':
+    case 'item.delta':
+    case 'item.updated': {
+      const item = ev.item;
+      const itemType = String(item?.type || '').trim().toLowerCase();
+      if (itemType === 'reasoning') {
+        const text = String(item?.text || item?.summary || '').trim();
+        if (text) state.reasonings.push(text);
+        break;
+      }
+      if (!['agent_message', 'assistant_message', 'message'].includes(itemType)) break;
+      const text = extractAgentMessageText(item);
+      if (!text) break;
+      if (isFinalAnswerLikeAgentMessage(item)) state.finalAnswerMessages.push(text);
+      else state.messages.push(text);
+      break;
+    }
     case 'assistant.message.delta':
     case 'assistant.message': {
       const text = extractAgentMessageText(ev);
@@ -313,13 +380,26 @@ function handleCodexRunnerEvent(ev, state, ensureSessionBridge) {
     case 'usage':
       state.usage = ev;
       break;
+    case 'turn.completed':
+      state.usage = ev;
+      break;
     default:
       break;
   }
 }
 
+export { handleCodexRunnerEvent };
+
 function handleClaudeRunnerEvent(ev, state, ensureSessionBridge) {
   switch (ev.type) {
+    case 'stream_event': {
+      const block = ev.event?.content_block;
+      if (ev.event?.type === 'content_block_start' && block?.type === 'tool_use') {
+        const toolName = String(block.name || '').trim().toLowerCase();
+        if (toolName === 'agent') state.meta.claudeSawAgentToolUse = true;
+      }
+      break;
+    }
     case 'session.created':
     case 'session.resumed':
       state.threadId = ev.session_id || state.threadId;
@@ -335,6 +415,7 @@ function handleClaudeRunnerEvent(ev, state, ensureSessionBridge) {
     case 'result': {
       const text = extractClaudeText(ev);
       if (text) state.finalAnswerMessages.push(text);
+      state.meta.claudeStopReason = ev.stop_reason ?? '';
       if (ev.session_id) {
         state.threadId = ev.session_id;
         ensureSessionBridge(state.threadId);
@@ -345,6 +426,40 @@ function handleClaudeRunnerEvent(ev, state, ensureSessionBridge) {
     default:
       break;
   }
+}
+
+function normalizeComparableText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function hasVisibleAssistantText(result) {
+  return Boolean(
+    (Array.isArray(result?.finalAnswerMessages) && result.finalAnswerMessages.some((item) => String(item || '').trim()))
+    || (Array.isArray(result?.messages) && result.messages.some((item) => String(item || '').trim())),
+  );
+}
+
+export function shouldAutoRecoverClaudeResult(result) {
+  if (!result || typeof result !== 'object') return false;
+  if (!result.ok || result.cancelled || result.timedOut) return false;
+
+  const meta = result.meta && typeof result.meta === 'object' ? result.meta : null;
+  if (!meta?.claudeSawAgentToolUse) return false;
+  if (meta.claudeStopReason !== null && meta.claudeStopReason !== '') return false;
+
+  const finalText = normalizeComparableText(result.finalAnswerMessages?.[result.finalAnswerMessages.length - 1] || '');
+  const latestMessage = normalizeComparableText(result.messages?.[result.messages.length - 1] || '');
+  if (!finalText || !latestMessage) return false;
+  return finalText === latestMessage;
+}
+
+export function buildClaudeRecoveryPrompt() {
+  return [
+    '继续刚才的同一任务。',
+    '不要把“我来看看 / 我会分析 / 我将研究”之类的过程说明当作最终答案。',
+    '请直接完成任务并输出最终答案。',
+    '如果确实被工具、权限或外部访问限制卡住，请明确说明阻塞原因和下一步建议，不要只输出一句开场白。',
+  ].join('\n');
 }
 
 function extractClaudeText(ev) {
