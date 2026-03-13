@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import {
+  getProviderShortName,
+  providerBindsSessionsToWorkspace,
+} from './provider-metadata.js';
 
 const WORKSPACE_BROWSER_PREFIX = 'wsp';
 const MAX_SELECT_OPTIONS = 25;
@@ -115,8 +119,8 @@ function formatMaybePath(dir, language, source = null) {
 }
 
 function formatImpactLine({ mode, language, provider, changed }) {
-  const workspaceBoundProvider = provider !== 'claude';
-  const providerLabel = provider === 'gemini' ? 'Gemini' : 'Codex';
+  const workspaceBoundProvider = providerBindsSessionsToWorkspace(provider);
+  const providerLabel = getProviderShortName(provider);
   if (!changed) {
     return language === 'en'
       ? '• impact: no change'
@@ -140,8 +144,8 @@ function formatImpactLine({ mode, language, provider, changed }) {
       : `• 影响：应用后会重置当前 ${providerLabel} session`;
   }
   return language === 'en'
-    ? '• impact: keeps current Claude session when possible'
-    : '• 影响：Claude 会尽量保留当前 session';
+    ? `• impact: keeps current ${providerLabel} session when possible`
+    : `• 影响：${providerLabel} 会尽量保留当前 session`;
 }
 
 function buildWorkspaceBrowserButtonId(action, token, userId, version, page) {

@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,6 +12,29 @@ import {
   parseOptionalProvider,
   resolveDiscordToken,
 } from './bot-instance-utils.js';
+import {
+  formatReasoningEffortUnsupported,
+  getProviderBinEnvName,
+  getProviderDefaultBin,
+  getProviderDisplayName,
+  getProviderShortName,
+  isReasoningEffortSupported,
+  normalizeProvider,
+  parseProviderInput,
+} from './provider-metadata.js';
+import {
+  buildSpawnEnv,
+  formatCliHealth,
+  getCliHealth as getCliHealthBase,
+  getProviderBin as getProviderBinBase,
+  isCliNotFound,
+} from './provider-runtime.js';
+import {
+  findLatestClaudeSessionFileBySessionId,
+  findLatestRolloutFileBySessionId,
+  listRecentSessions as listRecentProviderSessions,
+  readGeminiSessionState,
+} from './provider-sessions.js';
 import { createChannelQueue } from './channel-queue.js';
 import { createChannelRuntimeStore, stopChildProcess } from './channel-runtime.js';
 import { loadRuntimeEnv } from './env-loader.js';
@@ -208,6 +230,18 @@ const MODEL_AUTO_COMPACT_TOKEN_LIMIT = toInt(
 );
 const SLASH_PREFIX = normalizeSlashPrefix(process.env.SLASH_PREFIX || getDefaultSlashPrefix(BOT_PROVIDER));
 const SPAWN_ENV = buildSpawnEnv(process.env);
+const getProviderBin = (provider) => getProviderBinBase(provider, {
+  codexBin: CODEX_BIN,
+  claudeBin: CLAUDE_BIN,
+  geminiBin: GEMINI_BIN,
+});
+const getCliHealth = (provider = DEFAULT_PROVIDER) => getCliHealthBase(provider, {
+  codexBin: CODEX_BIN,
+  claudeBin: CLAUDE_BIN,
+  geminiBin: GEMINI_BIN,
+  spawnEnv: SPAWN_ENV,
+  safeError,
+});
 
 ensureDir(DATA_DIR);
 ensureDir(WORKSPACE_ROOT);
@@ -254,71 +288,8 @@ function getCodexDefaults() {
   }
 }
 
-function normalizeProvider(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (['codex', 'openai'].includes(raw)) return 'codex';
-  if (['claude', 'anthropic'].includes(raw)) return 'claude';
-  if (['gemini', 'google'].includes(raw)) return 'gemini';
-  return 'codex';
-}
-
 function getSessionProvider(session) {
   return normalizeProvider(session?.provider || DEFAULT_PROVIDER);
-}
-
-function getProviderDisplayName(provider) {
-  switch (normalizeProvider(provider)) {
-    case 'claude':
-      return 'Claude Code';
-    case 'gemini':
-      return 'Gemini CLI';
-    default:
-      return 'Codex CLI';
-  }
-}
-
-function getProviderShortName(provider) {
-  switch (normalizeProvider(provider)) {
-    case 'claude':
-      return 'Claude';
-    case 'gemini':
-      return 'Gemini';
-    default:
-      return 'Codex';
-  }
-}
-
-function getProviderDefaultBin(provider) {
-  switch (normalizeProvider(provider)) {
-    case 'claude':
-      return 'claude';
-    case 'gemini':
-      return 'gemini';
-    default:
-      return 'codex';
-  }
-}
-
-function getProviderBin(provider) {
-  switch (normalizeProvider(provider)) {
-    case 'claude':
-      return CLAUDE_BIN;
-    case 'gemini':
-      return GEMINI_BIN;
-    default:
-      return CODEX_BIN;
-  }
-}
-
-function getProviderBinEnvName(provider) {
-  switch (normalizeProvider(provider)) {
-    case 'claude':
-      return 'CLAUDE_BIN';
-    case 'gemini':
-      return 'GEMINI_BIN';
-    default:
-      return 'CODEX_BIN';
-  }
 }
 
 function getSessionId(session) {
@@ -387,7 +358,11 @@ const commandActions = createSessionCommandActions({
   getSessionProvider,
   getProviderShortName,
   resolveTimeoutSetting,
-  listRecentSessions,
+  listRecentSessions: ({ provider = DEFAULT_PROVIDER, workspaceDir = '', limit = 10 } = {}) => listRecentProviderSessions({
+    provider,
+    workspaceDir,
+    limit,
+  }),
   humanAge,
 });
 
@@ -1674,31 +1649,10 @@ function parseReasoningEffortInput(value, { allowDefault = false } = {}) {
   return null;
 }
 
-function isReasoningEffortSupported(provider, effort) {
-  if (!effort) return true;
-  const normalizedProvider = normalizeProvider(provider);
-  if (normalizedProvider === 'codex') return true;
-  if (normalizedProvider === 'claude') return effort !== 'xhigh';
-  return false;
-}
-
 function formatReasoningEffortHelp(language) {
   return language === 'en'
     ? 'Usage: `!effort <xhigh|high|medium|low|default>`'
     : '用法：`!effort <xhigh|high|medium|low|default>`';
-}
-
-function formatReasoningEffortUnsupported(provider, language) {
-  if (normalizeProvider(provider) === 'gemini') {
-    if (language === 'en') {
-      return `⚠️ Reasoning effort is not currently supported for Gemini CLI. Current provider: ${getProviderDisplayName(provider)}.`;
-    }
-    return `⚠️ Gemini CLI 当前不支持 reasoning effort。当前 provider：${getProviderDisplayName(provider)}。`;
-  }
-  if (language === 'en') {
-    return `⚠️ \`xhigh\` is currently only supported for Codex CLI. Current provider: ${getProviderDisplayName(provider)}.`;
-  }
-  return `⚠️ \`xhigh\` 目前仅支持 Codex CLI。当前 provider：${getProviderDisplayName(provider)}。`;
 }
 
 function formatSettingSourceLabel(source, language = 'en') {
@@ -2863,34 +2817,6 @@ function normalizeSlashPrefix(value) {
   return raw.slice(0, 12);
 }
 
-function buildSpawnEnv(env) {
-  const out = { ...env };
-  const home = out.HOME || out.USERPROFILE || '';
-  const delimiter = path.delimiter;
-  const rawPath = out.PATH || '';
-  const entries = rawPath.split(delimiter).filter(Boolean);
-  const seen = new Set(entries);
-
-  const extras = [
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/usr/bin',
-    '/bin',
-    home ? path.join(home, '.local', 'bin') : null,
-    home ? path.join(home, 'bin') : null,
-  ].filter(Boolean);
-
-  for (const p of extras) {
-    if (!seen.has(p)) {
-      entries.push(p);
-      seen.add(p);
-    }
-  }
-
-  out.PATH = entries.join(delimiter);
-  return out;
-}
-
 function getProviderDefaults(provider) {
   if (normalizeProvider(provider) !== 'codex') {
     return { model: '(provider default)', effort: '(provider default)', source: 'provider' };
@@ -2899,95 +2825,6 @@ function getProviderDefaults(provider) {
     ...getCodexDefaults(),
     source: 'config.toml',
   };
-}
-
-function getCliHealth(provider = DEFAULT_PROVIDER) {
-  switch (normalizeProvider(provider)) {
-    case 'claude':
-      return getClaudeCliHealth();
-    case 'gemini':
-      return getGeminiCliHealth();
-    default:
-      return getCodexCliHealth();
-  }
-}
-
-function getCliHealthForBin({ bin, envKey }) {
-  const check = spawnSync(bin, ['--version'], {
-    env: SPAWN_ENV,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf8',
-  });
-
-  if (check.error) {
-    return {
-      ok: false,
-      bin,
-      envKey,
-      error: safeError(check.error),
-    };
-  }
-
-  if (check.status !== 0) {
-    return {
-      ok: false,
-      bin,
-      envKey,
-      error: (check.stderr || check.stdout || `exit=${check.status}`).trim(),
-    };
-  }
-
-  const versionLine = (check.stdout || check.stderr || '').trim().split('\n')[0] || 'ok';
-  return {
-    ok: true,
-    bin,
-    envKey,
-    version: versionLine,
-  };
-}
-
-function getCodexCliHealth() {
-  return getCliHealthForBin({ bin: CODEX_BIN, envKey: 'CODEX_BIN' });
-}
-
-function getClaudeCliHealth() {
-  return getCliHealthForBin({ bin: CLAUDE_BIN, envKey: 'CLAUDE_BIN' });
-}
-
-function getGeminiCliHealth() {
-  return getCliHealthForBin({ bin: GEMINI_BIN, envKey: 'GEMINI_BIN' });
-}
-
-function formatCliHealth(health, language = 'zh') {
-  if (health.ok) return `✅ \`${health.bin}\` (${health.version})`;
-  if (isCliNotFound(health.error)) {
-    return language === 'en'
-      ? `❌ \`${health.bin}\` not found (set ${health.envKey || 'CLI_BIN'}=/absolute/path/${health.bin} in .env)`
-      : `❌ 未找到 \`${health.bin}\`（可在 .env 设置 ${health.envKey || 'CLI_BIN'}=/绝对路径/${health.bin}）`;
-  }
-  return `❌ ${truncate(String(health.error || 'unknown error'), 220)}`;
-}
-
-function formatCodexHealth(health) {
-  return formatCliHealth(health);
-}
-
-function isCliNotFound(errorText) {
-  const msg = String(errorText || '').toLowerCase();
-  return msg.includes('enoent') || msg.includes('not found');
-}
-
-function isCodexNotFound(errorText) {
-  return isCliNotFound(errorText);
-}
-
-function parseProviderInput(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw) return null;
-  if (['codex', 'openai'].includes(raw)) return 'codex';
-  if (['claude', 'anthropic'].includes(raw)) return 'claude';
-  if (['gemini', 'google'].includes(raw)) return 'gemini';
-  return null;
 }
 
 function parseWorkspaceCommandAction(value) {
@@ -3290,408 +3127,6 @@ async function isAllowedInteractionChannel(interaction) {
 
   const parentId = channel.isThread?.() ? channel.parentId : null;
   return Boolean(parentId && ALLOWED_CHANNEL_IDS.has(parentId));
-}
-
-function listRecentSessions({ provider = DEFAULT_PROVIDER, workspaceDir = '', limit = 10 } = {}) {
-  switch (normalizeProvider(provider)) {
-    case 'claude':
-      return listRecentClaudeSessions(limit, workspaceDir);
-    case 'gemini':
-      return listRecentGeminiSessions(limit, workspaceDir);
-    default:
-      return listRecentCodexSessions(limit);
-  }
-}
-
-function listRecentCodexSessions(limit = 10) {
-  const sessionsDir = getCodexSessionsDir();
-  if (!sessionsDir || !fs.existsSync(sessionsDir)) return [];
-
-  const files = findCodexRolloutFiles(sessionsDir);
-  const latestById = new Map();
-
-  for (const file of files) {
-    const id = parseSessionIdFromRolloutFile(path.basename(file));
-    if (!id) continue;
-
-    let mtime = 0;
-    try {
-      mtime = fs.statSync(file).mtimeMs;
-    } catch {
-      continue;
-    }
-
-    const prev = latestById.get(id);
-    if (!prev || mtime > prev.mtime) {
-      latestById.set(id, { id, mtime });
-    }
-  }
-
-  return [...latestById.values()]
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, limit);
-}
-
-function listRecentClaudeSessions(limit = 10, workspaceDir = '') {
-  const preferredRoot = getClaudeProjectDir(workspaceDir);
-  const searchRoot = preferredRoot && fs.existsSync(preferredRoot) ? preferredRoot : getClaudeProjectsDir();
-  if (!searchRoot || !fs.existsSync(searchRoot)) return [];
-
-  return findClaudeSessionFiles(searchRoot)
-    .map((file) => {
-      const id = parseClaudeSessionIdFromFile(path.basename(file));
-      if (!id) return null;
-      try {
-        const stat = fs.statSync(file);
-        return stat.isFile() ? { id, mtime: stat.mtimeMs } : null;
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, limit);
-}
-
-function listRecentGeminiSessions(limit = 10, workspaceDir = '') {
-  const roots = getGeminiSearchRoots(workspaceDir);
-  if (!roots.length) return [];
-
-  const latestById = new Map();
-  for (const root of roots) {
-    for (const file of findGeminiSessionFiles(root)) {
-      const snapshot = readGeminiSessionFile(file);
-      const id = String(snapshot?.sessionId || '').trim();
-      if (!id) continue;
-
-      let mtime = Date.parse(String(snapshot?.lastUpdated || snapshot?.startTime || ''));
-      if (!Number.isFinite(mtime)) {
-        try {
-          mtime = fs.statSync(file).mtimeMs;
-        } catch {
-          mtime = 0;
-        }
-      }
-
-      const prev = latestById.get(id);
-      if (!prev || mtime > prev.mtime) {
-        latestById.set(id, { id, mtime });
-      }
-    }
-  }
-
-  return [...latestById.values()]
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, limit);
-}
-
-function findLatestRolloutFileBySessionId(sessionId, notOlderThanMs = 0) {
-  const targetId = String(sessionId || '').trim().toLowerCase();
-  if (!targetId) return null;
-
-  const sessionsDir = getCodexSessionsDir();
-  if (!sessionsDir || !fs.existsSync(sessionsDir)) return null;
-
-  const files = findCodexRolloutFiles(sessionsDir);
-  let latest = null;
-
-  for (const file of files) {
-    const id = parseSessionIdFromRolloutFile(path.basename(file));
-    if (!id || String(id).toLowerCase() !== targetId) continue;
-
-    let stat = null;
-    try {
-      stat = fs.statSync(file);
-    } catch {
-      continue;
-    }
-    if (!stat?.isFile()) continue;
-    if (notOlderThanMs > 0 && stat.mtimeMs < notOlderThanMs) continue;
-
-    if (!latest || stat.mtimeMs > latest.mtimeMs) {
-      latest = {
-        file,
-        mtimeMs: stat.mtimeMs,
-        sizeBytes: stat.size,
-      };
-    }
-  }
-
-  return latest;
-}
-
-function findLatestClaudeSessionFileBySessionId(sessionId, workspaceDir = '', notOlderThanMs = 0) {
-  const targetId = String(sessionId || '').trim().toLowerCase();
-  if (!targetId) return null;
-
-  const roots = [];
-  const preferredRoot = getClaudeProjectDir(workspaceDir);
-  if (preferredRoot) roots.push(preferredRoot);
-  const projectsRoot = getClaudeProjectsDir();
-  if (projectsRoot && !roots.includes(projectsRoot)) roots.push(projectsRoot);
-
-  let latest = null;
-  for (const root of roots) {
-    if (!root || !fs.existsSync(root)) continue;
-    for (const file of findClaudeSessionFiles(root)) {
-      const id = parseClaudeSessionIdFromFile(path.basename(file));
-      if (!id || String(id).toLowerCase() !== targetId) continue;
-
-      let stat = null;
-      try {
-        stat = fs.statSync(file);
-      } catch {
-        continue;
-      }
-      if (!stat?.isFile()) continue;
-      if (notOlderThanMs > 0 && stat.mtimeMs < notOlderThanMs) continue;
-
-      if (!latest || stat.mtimeMs > latest.mtimeMs) {
-        latest = { file, mtimeMs: stat.mtimeMs, sizeBytes: stat.size };
-      }
-    }
-    if (latest) return latest;
-  }
-
-  return latest;
-}
-
-function findLatestGeminiSessionFileBySessionId(sessionId, workspaceDir = '', notOlderThanMs = 0) {
-  const targetId = String(sessionId || '').trim().toLowerCase();
-  if (!targetId) return null;
-
-  let latest = null;
-  for (const root of getGeminiSearchRoots(workspaceDir)) {
-    for (const file of findGeminiSessionFiles(root)) {
-      const snapshot = readGeminiSessionFile(file);
-      const id = String(snapshot?.sessionId || '').trim().toLowerCase();
-      if (!id || id !== targetId) continue;
-
-      let stat = null;
-      try {
-        stat = fs.statSync(file);
-      } catch {
-        continue;
-      }
-      if (!stat?.isFile()) continue;
-      if (notOlderThanMs > 0 && stat.mtimeMs < notOlderThanMs) continue;
-
-      if (!latest || stat.mtimeMs > latest.mtimeMs) {
-        latest = { file, mtimeMs: stat.mtimeMs, sizeBytes: stat.size };
-      }
-    }
-    if (latest) return latest;
-  }
-
-  return latest;
-}
-
-function getCodexSessionsDir() {
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  if (!home) return '';
-  return path.join(home, '.codex', 'sessions');
-}
-
-function getGeminiRootDir() {
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  if (!home) return '';
-  return path.join(home, '.gemini');
-}
-
-function getGeminiTmpDir() {
-  const root = getGeminiRootDir();
-  if (!root) return '';
-  return path.join(root, 'tmp');
-}
-
-function getClaudeProjectsDir() {
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  if (!home) return '';
-  return path.join(home, '.claude', 'projects');
-}
-
-function getClaudeProjectDir(workspaceDir = '') {
-  const projectsRoot = getClaudeProjectsDir();
-  const slug = encodeClaudeProjectPath(workspaceDir);
-  if (!projectsRoot || !slug) return '';
-  return path.join(projectsRoot, slug);
-}
-
-function encodeClaudeProjectPath(workspaceDir = '') {
-  const raw = String(workspaceDir || '').trim();
-  if (!raw) return '';
-  return path.resolve(raw).replace(/[\\/]/g, '-');
-}
-
-function getGeminiProjectDir(workspaceDir = '') {
-  const tmpRoot = getGeminiTmpDir();
-  const slug = resolveGeminiProjectSlug(workspaceDir);
-  if (!tmpRoot || !slug) return '';
-  return path.join(tmpRoot, slug);
-}
-
-function resolveGeminiProjectSlug(workspaceDir = '') {
-  const raw = String(workspaceDir || '').trim();
-  if (!raw) return '';
-  const normalizedWorkspace = path.resolve(raw);
-
-  const projects = readGeminiProjectsMap();
-  const direct = projects.get(normalizedWorkspace);
-  if (direct) return direct;
-
-  const tmpRoot = getGeminiTmpDir();
-  if (!tmpRoot || !fs.existsSync(tmpRoot)) return '';
-  try {
-    const entries = fs.readdirSync(tmpRoot, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const fullPath = path.join(tmpRoot, entry.name);
-      const projectRootFile = path.join(fullPath, '.project_root');
-      const projectRoot = safeReadText(projectRootFile);
-      if (projectRoot && path.resolve(projectRoot) === normalizedWorkspace) {
-        return entry.name;
-      }
-    }
-  } catch {
-  }
-
-  return '';
-}
-
-function readGeminiProjectsMap() {
-  const file = path.join(getGeminiRootDir(), 'projects.json');
-  const parsed = readJsonFile(file);
-  const projects = parsed?.projects && typeof parsed.projects === 'object' ? parsed.projects : {};
-  const out = new Map();
-  for (const [workspacePath, slug] of Object.entries(projects)) {
-    const normalizedWorkspace = String(workspacePath || '').trim();
-    const normalizedSlug = String(slug || '').trim();
-    if (!normalizedWorkspace || !normalizedSlug) continue;
-    out.set(path.resolve(normalizedWorkspace), normalizedSlug);
-  }
-  return out;
-}
-
-function getGeminiSearchRoots(workspaceDir = '') {
-  const roots = [];
-  const preferredRoot = getGeminiProjectDir(workspaceDir);
-  if (preferredRoot && fs.existsSync(preferredRoot)) roots.push(preferredRoot);
-
-  const tmpRoot = getGeminiTmpDir();
-  if (!tmpRoot || !fs.existsSync(tmpRoot)) return roots;
-
-  try {
-    const entries = fs.readdirSync(tmpRoot, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const fullPath = path.join(tmpRoot, entry.name);
-      if (!fs.existsSync(path.join(fullPath, '.project_root'))) continue;
-      if (!roots.includes(fullPath)) roots.push(fullPath);
-    }
-  } catch {
-  }
-
-  return roots;
-}
-
-function findFilesRecursive(root, predicate) {
-  const out = [];
-  const stack = [root];
-
-  while (stack.length) {
-    const dir = stack.pop();
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (entry.isFile() && predicate(entry.name, fullPath)) {
-        out.push(fullPath);
-      }
-    }
-  }
-
-  return out;
-}
-
-function findCodexRolloutFiles(root) {
-  return findFilesRecursive(root, (name) => name.startsWith('rollout-') && name.endsWith('.jsonl'));
-}
-
-function findClaudeSessionFiles(root) {
-  return findFilesRecursive(root, (name) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.jsonl$/i.test(name));
-}
-
-function findGeminiSessionFiles(root) {
-  const chatsDir = path.join(root, 'chats');
-  if (!fs.existsSync(chatsDir)) return [];
-  return findFilesRecursive(chatsDir, (name) => /^session-.*\.json$/i.test(name));
-}
-
-function parseSessionIdFromRolloutFile(filename) {
-  const match = filename.match(/^rollout-.*-([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.jsonl$/i);
-  return match?.[1] || null;
-}
-
-function parseClaudeSessionIdFromFile(filename) {
-  const match = String(filename || '').match(/^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.jsonl$/i);
-  return match?.[1] || null;
-}
-
-function readJsonFile(filePath) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-function safeReadText(filePath) {
-  try {
-    return fs.readFileSync(filePath, 'utf8').trim();
-  } catch {
-    return '';
-  }
-}
-
-function readGeminiSessionFile(filePath) {
-  return readJsonFile(filePath);
-}
-
-function readGeminiSessionState({ sessionId, workspaceDir = '' } = {}) {
-  const match = findLatestGeminiSessionFileBySessionId(sessionId, workspaceDir);
-  if (!match?.file) return null;
-
-  const snapshot = readGeminiSessionFile(match.file);
-  if (!snapshot || typeof snapshot !== 'object') return null;
-
-  const assistantMessages = Array.isArray(snapshot.messages)
-    ? snapshot.messages
-      .filter((item) => item && typeof item === 'object' && String(item.type || '').trim().toLowerCase() === 'gemini')
-      .map((item) => String(item.content || '').trim())
-      .filter(Boolean)
-    : [];
-
-  const finalAnswer = assistantMessages.at(-1) || '';
-  const messages = finalAnswer ? assistantMessages.slice(0, -1) : assistantMessages;
-  const lastAssistant = Array.isArray(snapshot.messages)
-    ? [...snapshot.messages].reverse().find((item) => item && typeof item === 'object' && String(item.type || '').trim().toLowerCase() === 'gemini')
-    : null;
-
-  return {
-    messages,
-    finalAnswer,
-    usage: lastAssistant?.tokens && typeof lastAssistant.tokens === 'object' ? lastAssistant.tokens : null,
-    file: match.file,
-  };
 }
 
 function truncate(text, max) {

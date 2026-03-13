@@ -1,40 +1,18 @@
-export function normalizeCliProvider(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (['codex', 'openai'].includes(raw)) return 'codex';
-  if (['claude', 'anthropic'].includes(raw)) return 'claude';
-  if (['gemini', 'google'].includes(raw)) return 'gemini';
-  return 'codex';
-}
+import {
+  normalizeProvider as normalizeCliProvider,
+  getProviderDisplayName,
+  getProviderShortName,
+  providerSupportsConfigOverrides,
+  providerSupportsNativeCompact,
+} from './provider-metadata.js';
 
-export function getProviderDisplayName(provider) {
-  switch (normalizeCliProvider(provider)) {
-    case 'claude':
-      return 'Claude Code';
-    case 'gemini':
-      return 'Gemini CLI';
-    default:
-      return 'Codex CLI';
-  }
-}
-
-export function getProviderShortName(provider) {
-  switch (normalizeCliProvider(provider)) {
-    case 'claude':
-      return 'Claude';
-    case 'gemini':
-      return 'Gemini';
-    default:
-      return 'Codex';
-  }
-}
-
-export function providerSupportsConfigOverrides(provider) {
-  return normalizeCliProvider(provider) === 'codex';
-}
-
-export function providerSupportsNativeCompact(provider) {
-  return normalizeCliProvider(provider) === 'codex';
-}
+export {
+  normalizeCliProvider,
+  getProviderDisplayName,
+  getProviderShortName,
+  providerSupportsConfigOverrides,
+  providerSupportsNativeCompact,
+};
 
 export function buildRunnerArgs({
   provider,

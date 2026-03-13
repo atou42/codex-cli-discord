@@ -145,9 +145,9 @@ test('createSlashCommandRouter routes abort alias to cancel handler', async () =
   });
 
   assert.equal(handled, true);
-  assert.deepEqual(state.getCancelCalls(), [{ key: 'channel-1', reason: 'slash_abort' }]);
+  assert.deepEqual(state.getCancelCalls(), [{ key: 'channel-1', reason: 'slash_cancel' }]);
   assert.deepEqual(state.replies, [{
-    content: JSON.stringify({ key: 'channel-1', reason: 'slash_abort' }),
+    content: JSON.stringify({ key: 'channel-1', reason: 'slash_cancel' }),
     flags: 64,
   }]);
 });

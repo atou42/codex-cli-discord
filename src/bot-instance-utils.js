@@ -1,11 +1,9 @@
-export function parseOptionalProvider(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw) return null;
-  if (['codex', 'openai'].includes(raw)) return 'codex';
-  if (['claude', 'anthropic'].includes(raw)) return 'claude';
-  if (['gemini', 'google'].includes(raw)) return 'gemini';
-  return null;
-}
+import {
+  getProviderDefaultSlashPrefix,
+  parseOptionalProvider,
+} from './provider-metadata.js';
+
+export { parseOptionalProvider };
 
 export function resolveProviderScopedEnv(envKey, provider = null, env = process.env) {
   const lockedProvider = parseOptionalProvider(provider);
@@ -42,8 +40,5 @@ export function describeBotMode(provider = null) {
 }
 
 export function getDefaultSlashPrefix(provider = null) {
-  const lockedProvider = parseOptionalProvider(provider);
-  if (lockedProvider === 'claude') return 'cc';
-  if (lockedProvider === 'gemini') return 'gm';
-  return 'cx';
+  return getProviderDefaultSlashPrefix(provider);
 }

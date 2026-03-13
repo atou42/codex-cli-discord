@@ -1,9 +1,7 @@
+import { providerBindsSessionsToWorkspace } from './provider-metadata.js';
+
 function hasWorkspaceChanged(previousDir, nextDir) {
   return String(previousDir || '') !== String(nextDir || '');
-}
-
-function providerBindsSessionsToWorkspace(provider) {
-  return provider !== 'claude';
 }
 
 function shouldResetSessionForWorkspaceChange(provider, previousDir, nextDir) {

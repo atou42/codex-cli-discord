@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { normalizeCommandName } from './command-spec.js';
 
 function isExistingDirectory(dir) {
   try {
@@ -67,29 +68,30 @@ export function createTextCommandHandler({
     const [cmd, ...rest] = content.split(/\s+/);
     const arg = rest.join(' ').trim();
     const session = getSession(key);
+    const commandName = normalizeCommandName(cmd, { allowBangPrefix: true });
 
-    switch (cmd.toLowerCase()) {
-      case '!help': {
+    switch (commandName) {
+      case 'help': {
         await safeReply(message, formatHelpReport(session));
         break;
       }
 
-      case '!status': {
+      case 'status': {
         await safeReply(message, formatStatusReport(key, session, message.channel));
         break;
       }
 
-      case '!queue': {
+      case 'queue': {
         await safeReply(message, formatQueueReport(key, session, message.channel));
         break;
       }
 
-      case '!doctor': {
+      case 'doctor': {
         await safeReply(message, formatDoctorReport(key, session, message.channel));
         break;
       }
 
-      case '!provider': {
+      case 'provider': {
         if (botProvider) {
           await safeReply(message, `🔒 当前 bot 已锁定 provider = \`${botProvider}\` (${getProviderDisplayName(botProvider)})，不能切换。`);
           break;
@@ -109,12 +111,10 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!onboarding':
-      case '!onboard':
-      case '!guide': {
+      case 'onboarding': {
         const language = getSessionLanguage(session);
         const onboardingOp = parseOnboardingConfigAction(arg);
-        if (cmd.toLowerCase() === '!onboarding' && onboardingOp) {
+        if (onboardingOp) {
           if (onboardingOp.type === 'invalid') {
             await safeReply(message, formatOnboardingConfigHelp(language));
             break;
@@ -137,8 +137,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!lang':
-      case '!language': {
+      case 'language': {
         const requested = parseUiLanguageInput(arg);
         if (!requested) {
           await safeReply(message, formatLanguageConfigHelp(getSessionLanguage(session)));
@@ -149,7 +148,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!profile': {
+      case 'profile': {
         const language = getSessionLanguage(session);
         if (!arg || ['status', 'state', 'show', '查看', '状态'].includes(arg.toLowerCase())) {
           await safeReply(message, formatProfileConfigReport(language, getEffectiveSecurityProfile(session).profile, false));
@@ -165,7 +164,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!timeout': {
+      case 'timeout': {
         const language = getSessionLanguage(session);
         const parsedTimeout = parseTimeoutConfigAction(arg || 'status');
         if (!parsedTimeout || parsedTimeout.type === 'invalid') {
@@ -181,24 +180,19 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!progress': {
+      case 'progress': {
         await safeReply(message, formatProgressReport(key, session, message.channel));
         break;
       }
 
-      case '!abort':
-      case '!cancel':
-      case '!stop': {
-        const outcome = cancelChannelWork(key, `text_command:${cmd.toLowerCase()}`);
+      case 'cancel': {
+        const outcome = cancelChannelWork(key, `text_command:${String(cmd || '').trim().toLowerCase()}`);
         await safeReply(message, formatCancelReport(outcome));
         break;
       }
 
-      case '!new':
-      case '!fresh':
-      case '!next':
-      case '!start': {
-        const outcome = cancelChannelWork(key, `text_command:${cmd.toLowerCase()}`);
+      case 'new': {
+        const outcome = cancelChannelWork(key, `text_command:${String(cmd || '').trim().toLowerCase()}`);
         commandActions.startNewSession(session);
         const lines = ['🆕 已切换到新会话。'];
         if (outcome.cancelledRunning) lines.push('当前运行中的任务已尝试取消。');
@@ -208,8 +202,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!cd':
-      case '!setdir': {
+      case 'setdir': {
         if (!arg) {
           await safeReply(message, formatWorkspaceSetHelp(getSessionLanguage(session)));
           return;
@@ -251,8 +244,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!setdefaultdir':
-      case '!defaultdir': {
+      case 'setdefaultdir': {
         if (!arg) {
           await safeReply(message, formatDefaultWorkspaceSetHelp(getSessionLanguage(session)));
           return;
@@ -294,7 +286,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!resume': {
+      case 'resume': {
         if (!arg) {
           await safeReply(message, '用法：`!resume <session-id>`\n用 `!sessions` 查看当前 provider 可用的 session。');
           return;
@@ -304,7 +296,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!sessions': {
+      case 'sessions': {
         try {
           const report = commandActions.formatRecentSessionsReport({
             key,
@@ -318,7 +310,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!model': {
+      case 'model': {
         if (!arg) {
           await safeReply(message, '用法：`!model <name|default>`\n例：`!model o3` / `!model gpt-5.3-codex` / `!model default`');
           return;
@@ -328,7 +320,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!effort': {
+      case 'effort': {
         const language = getSessionLanguage(session);
         const parsed = parseReasoningEffortInput(arg, { allowDefault: true });
         if (!parsed) {
@@ -345,7 +337,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!compact': {
+      case 'compact': {
         const provider = getSessionProvider(session);
         if (provider !== 'codex') {
           await safeReply(message, `⚠️ 当前 provider = \`${provider}\` (${getProviderDisplayName(provider)})，\`!compact\` 仅支持 Codex CLI。`);
@@ -366,7 +358,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!config': {
+      case 'config': {
         const provider = getSessionProvider(session);
         if (provider !== 'codex') {
           await safeReply(message, `⚠️ 当前 provider = \`${provider}\` (${getProviderDisplayName(provider)})，\`!config\` 仅支持 Codex CLI。`);
@@ -400,7 +392,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!mode': {
+      case 'mode': {
         if (!arg || !['safe', 'dangerous'].includes(arg.toLowerCase())) {
           await safeReply(message, '用法：`!mode <safe|dangerous>`');
           return;
@@ -410,7 +402,7 @@ export function createTextCommandHandler({
         break;
       }
 
-      case '!reset': {
+      case 'reset': {
         commandActions.resetSession(session);
         await safeReply(message, '♻️ 已清空会话 + 额外配置。下条消息新开上下文。');
         break;

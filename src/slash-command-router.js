@@ -1,7 +1,11 @@
 import fs from 'node:fs';
+import {
+  getActionButtonCommandNames,
+  normalizeCommandName,
+} from './command-spec.js';
 
 const ACTION_BUTTON_PREFIX = 'cmd';
-const ACTION_BUTTON_COMMANDS = new Set(['status', 'sessions', 'queue', 'progress', 'new', 'cancel']);
+const ACTION_BUTTON_COMMANDS = new Set(getActionButtonCommandNames());
 
 function isExistingDirectory(dir) {
   try {
@@ -33,7 +37,7 @@ export function parseCommandActionButtonId(customId) {
   const match = /^cmd:([a-z_]+):([0-9]{5,32})$/i.exec(String(customId || '').trim());
   if (!match) return null;
 
-  const command = String(match[1] || '').trim().toLowerCase();
+  const command = normalizeCommandName(match[1]);
   const userId = String(match[2] || '').trim();
   if (!ACTION_BUTTON_COMMANDS.has(command)) return null;
   return { command, userId };
@@ -491,7 +495,7 @@ export function createSlashCommandRouter({
       return true;
     }
 
-    const normalizedCommand = String(commandName || '').trim().toLowerCase();
+    const normalizedCommand = normalizeCommandName(commandName);
     const handler = handlers.get(normalizedCommand);
     if (!handler) return false;
 
