@@ -136,23 +136,6 @@ test('createPromptOrchestrator.shouldCompactSession respects strategy threshold 
   assert.equal(orchestrator.shouldCompactSession(session), false);
 });
 
-test('createPromptOrchestrator.composeResultText renders reasoning answer notes and session label', () => {
-  const { session, orchestrator } = createOrchestrator();
-
-  const text = orchestrator.composeResultText({
-    reasonings: ['step one', 'step two'],
-    messages: ['fallback'],
-    finalAnswerMessages: ['final answer'],
-    notes: ['auto reset'],
-    threadId: 'sess-9',
-  }, session);
-
-  assert.match(text, /🧠 Reasoning/);
-  assert.match(text, /final answer/);
-  assert.match(text, /• auto reset/);
-  assert.match(text, /• session: \*\*demo\*\* \(`sess-9`\)/);
-});
-
 test('createPromptOrchestrator.handlePrompt runs task updates session and replies with result', async () => {
   const harness = createOrchestrator();
   const { session, replyLog, progressCalls, orchestrator } = harness;

@@ -1,6 +1,7 @@
+import { createPromptResultRenderer } from './prompt-result-renderer.js';
+
 export function createPromptOrchestrator({
   showReasoning = false,
-  progressProcessLines = 2,
   resultChunkChars = 1900,
   safeReply,
   withDiscordNetworkRetry,
@@ -44,6 +45,15 @@ export function createPromptOrchestrator({
   extractInputTokensFromUsage,
   composeFinalAnswerText,
 } = {}) {
+  const { composeResultText } = createPromptResultRenderer({
+    showReasoning,
+    truncate,
+    composeFinalAnswerText,
+    getProviderShortName,
+    getSessionProvider,
+    getSessionId,
+  });
+
   function shouldCompactSession(session) {
     const compactSetting = resolveCompactStrategySetting(session);
     const enabledSetting = resolveCompactEnabledSetting(session);
@@ -105,40 +115,6 @@ export function createPromptOrchestrator({
       '请在不丢失关键上下文的前提下继续处理以下新请求：',
       userPrompt,
     ].join('\n');
-  }
-
-  function composeResultText(result, session) {
-    const sections = [];
-
-    if (showReasoning && result.reasonings.length) {
-      sections.push([
-        '🧠 Reasoning',
-        truncate(result.reasonings.join('\n\n'), 1200),
-      ].join('\n'));
-    }
-
-    const answer = composeFinalAnswerText({
-      messages: result.messages,
-      finalAnswerMessages: result.finalAnswerMessages,
-    });
-    sections.push(answer || `（${getProviderShortName(getSessionProvider(session))} 没有返回可见文本）`);
-
-    const tail = [];
-    if (result.notes.length) {
-      tail.push(...result.notes.map((note) => `• ${note}`));
-    }
-    const currentSessionId = getSessionId(session);
-    if (currentSessionId || result.threadId) {
-      const id = result.threadId || currentSessionId;
-      const label = session.name ? `**${session.name}** (\`${id}\`)` : `\`${id}\``;
-      tail.push(`• session: ${label}`);
-    }
-
-    if (tail.length) {
-      sections.push(['', '—', ...tail].join('\n'));
-    }
-
-    return sections.join('\n\n').trim();
   }
 
   async function handlePrompt(message, key, prompt, channelState) {
