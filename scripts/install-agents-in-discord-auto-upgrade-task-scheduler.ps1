@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
-$TaskName = if ($env:TASK_NAME) { $env:TASK_NAME } elseif ($env:LABEL) { $env:LABEL } else { 'codex-cli-auto-upgrade' }
-$BotTaskName = if ($env:BOT_TASK_NAME) { $env:BOT_TASK_NAME } elseif ($env:BOT_LABEL) { $env:BOT_LABEL } else { 'codex-discord-bot' }
+$TaskName = if ($env:TASK_NAME) { $env:TASK_NAME } elseif ($env:LABEL) { $env:LABEL } else { 'agents-in-discord-auto-upgrade' }
+$BotTaskName = if ($env:BOT_TASK_NAME) { $env:BOT_TASK_NAME } elseif ($env:BOT_LABEL) { $env:BOT_LABEL } else { 'agents-in-discord' }
 $ScheduleHourRaw = if ($env:SCHEDULE_HOUR) { $env:SCHEDULE_HOUR } else { '5' }
 $ScheduleMinuteRaw = if ($env:SCHEDULE_MINUTE) { $env:SCHEDULE_MINUTE } else { '15' }
 
@@ -23,8 +23,8 @@ if ($ScheduleMinute -lt 0 -or $ScheduleMinute -gt 59) {
 }
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$UpgradeScript = Join-Path $PSScriptRoot 'codex-auto-upgrade.ps1'
-$LogPath = Join-Path $ProjectRoot 'logs/codex-auto-upgrade.log'
+$UpgradeScript = Join-Path $PSScriptRoot 'agents-in-discord-auto-upgrade.ps1'
+$LogPath = Join-Path $ProjectRoot 'logs/agents-in-discord.auto-upgrade.log'
 $timeText = '{0:D2}:{1:D2}' -f $ScheduleHour, $ScheduleMinute
 $taskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$UpgradeScript`" -BotTaskName `"$BotTaskName`""
 

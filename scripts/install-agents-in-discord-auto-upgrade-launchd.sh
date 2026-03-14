@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-LABEL="${LABEL:-com.atou.codex-cli-auto-upgrade}"
-BOT_LABEL="${BOT_LABEL:-com.atou.codex-discord-bot}"
+LABEL="${LABEL:-com.atou.agents-in-discord.auto-upgrade}"
+BOT_LABEL="${BOT_LABEL:-com.atou.agents-in-discord}"
 SCHEDULE_HOUR="${SCHEDULE_HOUR:-5}"
 SCHEDULE_MINUTE="${SCHEDULE_MINUTE:-15}"
 
@@ -20,9 +20,9 @@ fi
 
 AGENTS_DIR="${HOME}/Library/LaunchAgents"
 PLIST_PATH="${AGENTS_DIR}/${LABEL}.plist"
-UPGRADE_SCRIPT="${PROJECT_ROOT}/scripts/codex-auto-upgrade.sh"
-STDOUT_PATH="${PROJECT_ROOT}/logs/codex-auto-upgrade.log"
-STDERR_PATH="${PROJECT_ROOT}/logs/codex-auto-upgrade.err.log"
+UPGRADE_SCRIPT="${PROJECT_ROOT}/scripts/agents-in-discord-auto-upgrade.sh"
+STDOUT_PATH="${PROJECT_ROOT}/logs/agents-in-discord.auto-upgrade.log"
+STDERR_PATH="${PROJECT_ROOT}/logs/agents-in-discord.auto-upgrade.err.log"
 UID_VALUE="$(id -u)"
 SERVICE_REF="gui/${UID_VALUE}/${LABEL}"
 

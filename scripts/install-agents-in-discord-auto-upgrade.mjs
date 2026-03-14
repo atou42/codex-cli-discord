@@ -49,25 +49,25 @@ const scheduler = resolveScheduler(process.env.AUTO_UPGRADE_SCHEDULER);
 
 if (scheduler === 'none') {
   console.log('[auto-upgrade] scheduler disabled (AUTO_UPGRADE_SCHEDULER=none).');
-  console.log('[auto-upgrade] run manually: node scripts/codex-auto-upgrade.mjs');
+  console.log('[auto-upgrade] run manually: node scripts/agents-in-discord-auto-upgrade.mjs');
   process.exit(0);
 }
 
 if (scheduler === 'launchd') {
-  run('bash', ['scripts/install-codex-auto-upgrade-launchd.sh']);
+  run('bash', ['scripts/install-agents-in-discord-auto-upgrade-launchd.sh']);
   process.exit(0);
 }
 
 if (scheduler === 'task-scheduler') {
-  const taskName = process.env.TASK_NAME || process.env.LABEL || 'codex-cli-auto-upgrade';
-  const botTaskName = process.env.BOT_TASK_NAME || process.env.BOT_LABEL || 'codex-discord-bot';
+  const taskName = process.env.TASK_NAME || process.env.LABEL || 'agents-in-discord-auto-upgrade';
+  const botTaskName = process.env.BOT_TASK_NAME || process.env.BOT_LABEL || 'agents-in-discord';
 
   run('powershell.exe', [
     '-NoProfile',
     '-ExecutionPolicy',
     'Bypass',
     '-File',
-    'scripts/install-codex-auto-upgrade-task-scheduler.ps1',
+    'scripts/install-agents-in-discord-auto-upgrade-task-scheduler.ps1',
   ], {
     TASK_NAME: taskName,
     BOT_TASK_NAME: botTaskName,

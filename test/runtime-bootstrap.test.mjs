@@ -13,7 +13,7 @@ import {
 } from '../src/runtime-bootstrap.js';
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-discord-runtime-bootstrap-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-in-discord-runtime-bootstrap-'));
 }
 
 test('readCodexDefaults reads model and reasoning effort from ~/.codex/config.toml', () => {

@@ -8,7 +8,7 @@ import { createProviderDefaultWorkspaceStore, resolveConfiguredWorkspaceDir, res
 import { autoRepairProxyEnv } from '../src/proxy-env.js';
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-discord-runtime-env-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-in-discord-runtime-env-'));
 }
 
 test('autoRepairProxyEnv infers local SOCKS proxy and persists missing keys', () => {

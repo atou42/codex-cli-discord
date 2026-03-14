@@ -9,9 +9,9 @@ param(
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $LogDir = Join-Path $ProjectRoot 'logs'
-$StdoutPath = Join-Path $LogDir 'codex-auto-upgrade.log'
-$StderrPath = Join-Path $LogDir 'codex-auto-upgrade.err.log'
-$CoreScript = Join-Path $PSScriptRoot 'codex-auto-upgrade.mjs'
+$StdoutPath = Join-Path $LogDir 'agents-in-discord.auto-upgrade.log'
+$StderrPath = Join-Path $LogDir 'agents-in-discord.auto-upgrade.err.log'
+$CoreScript = Join-Path $PSScriptRoot 'agents-in-discord-auto-upgrade.mjs'
 
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 

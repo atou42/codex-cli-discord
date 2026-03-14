@@ -10,7 +10,7 @@ import {
 } from '../src/provider-sessions.js';
 
 test('provider-sessions reads gemini session state from project-scoped files', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-discord-gemini-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-in-discord-gemini-'));
   const workspaceDir = path.join(root, 'workspace');
   fs.mkdirSync(workspaceDir, { recursive: true });
 

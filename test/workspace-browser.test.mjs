@@ -77,7 +77,7 @@ const ButtonStyle = {
 };
 
 function createTempWorkspace() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-discord-workspace-browser-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-in-discord-workspace-browser-'));
 }
 
 function createBrowser({

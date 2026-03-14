@@ -7,7 +7,7 @@ import path from 'node:path';
 import { loadRuntimeEnv } from '../src/env-loader.js';
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-discord-env-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-in-discord-env-'));
 }
 
 test('loadRuntimeEnv applies provider-scoped keys from a single .env file', () => {

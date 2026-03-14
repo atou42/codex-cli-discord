@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSingleInstanceLock } from '../src/single-instance-lock.js';
 
 function makeTempRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-discord-lock-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-in-discord-lock-'));
 }
 
 function createLogger() {

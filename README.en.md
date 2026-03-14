@@ -1,4 +1,4 @@
-# Codex-ClaudeCode-in-Discord
+# Agents in Discord
 
 A standalone Discord bot that lets you direct **Codex CLI** and **Claude Code** from inside Discord.
 
@@ -47,8 +47,8 @@ A standalone Discord bot that lets you direct **Codex CLI** and **Claude Code** 
 ## Quickstart
 
 ```bash
-git clone https://github.com/atou42/Codex-ClaudeCode-in-Discord.git
-cd Codex-ClaudeCode-in-Discord
+git clone https://github.com/atou42/agents-in-discord.git
+cd agents-in-discord
 cp .env.example .env
 npm install
 npm run setup-hooks
@@ -195,22 +195,22 @@ CODEX_UPGRADE_DRY_RUN=1 npm run run:auto-upgrade
 
 Default IDs:
 
-- Upgrade service label: `com.atou.codex-cli-auto-upgrade` (`LABEL`)
-- Bot service label: `com.atou.codex-discord-bot` (`BOT_LABEL`)
+- Upgrade service label: `com.atou.agents-in-discord.auto-upgrade` (`LABEL`)
+- Bot service label: `com.atou.agents-in-discord` (`BOT_LABEL`)
 
 Check service and logs:
 
 ```bash
-launchctl print gui/$(id -u)/com.atou.codex-cli-auto-upgrade
-tail -n 100 logs/codex-auto-upgrade.log
-tail -n 100 logs/codex-auto-upgrade.err.log
+launchctl print gui/$(id -u)/com.atou.agents-in-discord.auto-upgrade
+tail -n 100 logs/agents-in-discord.auto-upgrade.log
+tail -n 100 logs/agents-in-discord.auto-upgrade.err.log
 ```
 
 Remove service:
 
 ```bash
-launchctl bootout gui/$(id -u)/com.atou.codex-cli-auto-upgrade
-rm -f ~/Library/LaunchAgents/com.atou.codex-cli-auto-upgrade.plist
+launchctl bootout gui/$(id -u)/com.atou.agents-in-discord.auto-upgrade
+rm -f ~/Library/LaunchAgents/com.atou.agents-in-discord.auto-upgrade.plist
 ```
 
 ### Windows (`Task Scheduler`)
@@ -220,21 +220,21 @@ PowerShell install (equivalent to `npm run install:auto-upgrade`):
 ```powershell
 $env:SCHEDULE_HOUR='5'
 $env:SCHEDULE_MINUTE='15'
-$env:TASK_NAME='codex-cli-auto-upgrade'
-$env:BOT_TASK_NAME='codex-discord-bot'
-node scripts/install-codex-auto-upgrade.mjs
+$env:TASK_NAME='agents-in-discord-auto-upgrade'
+$env:BOT_TASK_NAME='agents-in-discord'
+node scripts/install-agents-in-discord-auto-upgrade.mjs
 ```
 
 Defaults:
 
-- Upgrade task name: `codex-cli-auto-upgrade` (`TASK_NAME` or `LABEL`)
-- Bot restart task: `codex-discord-bot` (`BOT_TASK_NAME` or `BOT_LABEL`)
+- Upgrade task name: `agents-in-discord-auto-upgrade` (`TASK_NAME` or `LABEL`)
+- Bot restart task: `agents-in-discord` (`BOT_TASK_NAME` or `BOT_LABEL`)
 
 Inspect/remove task:
 
 ```powershell
-schtasks /Query /TN "codex-cli-auto-upgrade" /V /FO LIST
-schtasks /Delete /TN "codex-cli-auto-upgrade" /F
+schtasks /Query /TN "agents-in-discord-auto-upgrade" /V /FO LIST
+schtasks /Delete /TN "agents-in-discord-auto-upgrade" /F
 ```
 
 ## Troubleshooting

@@ -1,7 +1,7 @@
 {
-  "name": "codex-claudecode-in-discord",
+  "name": "agents-in-discord",
   "version": "0.4.0",
-  "description": "A Discord bot for directing Codex CLI, Claude Code, and Gemini CLI from Discord, not an OpenClaw plugin.",
+  "description": "Run and manage multiple CLI agents from Discord threads.",
   "license": "MIT",
   "author": "ATou",
   "type": "module",
@@ -22,8 +22,8 @@
     "release:patch": "node scripts/cut-release.mjs patch",
     "release:minor": "node scripts/cut-release.mjs minor",
     "release:major": "node scripts/cut-release.mjs major",
-    "run:auto-upgrade": "node scripts/codex-auto-upgrade.mjs",
-    "install:auto-upgrade": "node scripts/install-codex-auto-upgrade.mjs",
+    "run:auto-upgrade": "node scripts/agents-in-discord-auto-upgrade.mjs",
+    "install:auto-upgrade": "node scripts/install-agents-in-discord-auto-upgrade.mjs",
     "patch-ws": "node scripts/patch-discord-ws.mjs",
     "postinstall": "node scripts/patch-discord-ws.mjs"
   },

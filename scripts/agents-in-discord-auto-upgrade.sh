@@ -2,4 +2,4 @@
 set -euo pipefail
 
 # Compatibility wrapper for environments still calling the shell entrypoint.
-exec node scripts/codex-auto-upgrade.mjs "$@"
+exec node scripts/agents-in-discord-auto-upgrade.mjs "$@"

@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const argv = new Set(process.argv.slice(2));
 const dryRun = argv.has('--dry-run') || process.env.CODEX_UPGRADE_DRY_RUN === '1';
-const lockDir = path.join(os.tmpdir(), 'codex-cli-auto-upgrade.lock');
+const lockDir = path.join(os.tmpdir(), 'agents-in-discord-auto-upgrade.lock');
 
 function now() {
   return new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -112,7 +112,7 @@ function installLock() {
 function runMacUpgrade() {
   const brewBin = (process.env.BREW_BIN || 'brew').trim();
   const caskName = (process.env.CODEX_CASK_NAME || 'codex').trim();
-  const botLabel = String(process.env.BOT_LABEL || 'com.atou.codex-discord-bot').trim();
+  const botLabel = String(process.env.BOT_LABEL || 'com.atou.agents-in-discord').trim();
   const uid = typeof process.getuid === 'function' ? process.getuid() : null;
 
   if (!commandExists(brewBin)) {
