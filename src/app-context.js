@@ -211,6 +211,7 @@ export function createAppContext({
       resolveTimeoutSetting: sessionSettings.resolveTimeoutSetting,
       commandActions,
       cancelChannelWork: promptRuntime.cancelChannelWork,
+      retryLastPrompt: promptRuntime.retryLastPrompt,
     },
     textCommandOptions: {
       ...textCommandOptions,

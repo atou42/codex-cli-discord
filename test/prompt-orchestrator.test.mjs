@@ -177,3 +177,63 @@ test('createPromptOrchestrator.handlePrompt runs task updates session and replie
     outcome: { ok: true, cancelled: false, timedOut: false, error: '' },
   });
 });
+
+test('createPromptOrchestrator.handlePrompt adds retry button after final failure', async () => {
+  let runCount = 0;
+  const harness = createOrchestrator({
+    runTask: async (options) => {
+      runCount += 1;
+      options.onSpawn?.({ pid: 456 });
+      return {
+        ok: false,
+        cancelled: false,
+        timedOut: false,
+        error: 'runner exploded',
+        logs: ['trace line'],
+        notes: [],
+        reasonings: [],
+        messages: [],
+        finalAnswerMessages: [],
+        threadId: null,
+        usage: null,
+      };
+    },
+  });
+  const { replyLog, progressCalls, orchestrator } = harness;
+  const message = {
+    id: 'msg-2',
+    author: { id: 'user-9' },
+    channel: {
+      async sendTyping() {},
+      async send(payload) {
+        replyLog.push(payload);
+      },
+    },
+  };
+  const channelState = { queue: [], cancelRequested: false, activeRun: null };
+
+  const outcome = await orchestrator.handlePrompt(message, 'thread-1', 'fail this', channelState);
+
+  assert.deepEqual(outcome, { ok: false, cancelled: false });
+  assert.equal(runCount, 2);
+  assert.equal(typeof replyLog[0], 'object');
+  assert.match(replyLog[0].content, /Codex 执行失败/);
+  assert.match(replyLog[0].content, /runner exploded/);
+  assert.deepEqual(replyLog[0].components, [
+    {
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: 1,
+          label: 'Retry',
+          custom_id: 'cmd:retry:user-9',
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(progressCalls.at(-1), {
+    type: 'finish',
+    outcome: { ok: false, cancelled: false, timedOut: false, error: 'runner exploded' },
+  });
+});

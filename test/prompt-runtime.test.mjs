@@ -40,6 +40,9 @@ test('createPromptRuntime wires presentation runtime runner orchestrator and que
     cancelChannelWork: () => 'cancel-one',
     cancelAllChannelWork: () => 'cancel-all',
     getRuntimeSnapshot: () => 'snapshot',
+    rememberFailedPrompt: () => 'remember-failed',
+    clearLastFailedPrompt: () => 'clear-failed',
+    getLastFailedPrompt: () => 'last-failed',
   };
   const bridgeFactory = {
     startSessionProgressBridge: () => 'stop-bridge',
@@ -56,6 +59,7 @@ test('createPromptRuntime wires presentation runtime runner orchestrator and que
   };
   const channelQueue = {
     enqueuePrompt: () => 'queued-prompt',
+    retryLastPrompt: () => 'retried-prompt',
   };
   const createProgressReporter = () => ({
     async start() {},
@@ -125,12 +129,16 @@ test('createPromptRuntime wires presentation runtime runner orchestrator and que
   assert.equal(calls.promptOrchestrator.formatTimeoutLabel, presentation.formatTimeoutLabel);
   assert.equal(calls.channelQueue.getChannelState, channelRuntimeStore.getChannelState);
   assert.equal(calls.channelQueue.handlePrompt, promptOrchestrator.handlePrompt);
+  assert.equal(calls.channelQueue.rememberFailedPrompt, channelRuntimeStore.rememberFailedPrompt);
+  assert.equal(calls.channelQueue.clearLastFailedPrompt, channelRuntimeStore.clearLastFailedPrompt);
+  assert.equal(calls.channelQueue.getLastFailedPrompt, channelRuntimeStore.getLastFailedPrompt);
 
   const runResult = await calls.promptOrchestrator.runTask({ prompt: 'demo' });
   assert.deepEqual(runResult, { ok: true, options: { prompt: 'demo' } });
   assert.deepEqual(runnerCalls, [{ prompt: 'demo' }]);
 
   assert.equal(runtime.enqueuePrompt, channelQueue.enqueuePrompt);
+  assert.equal(runtime.retryLastPrompt, channelQueue.retryLastPrompt);
   assert.equal(runtime.getRuntimeSnapshot, channelRuntimeStore.getRuntimeSnapshot);
   assert.equal(runtime.cancelChannelWork, channelRuntimeStore.cancelChannelWork);
   assert.equal(runtime.cancelAllChannelWork, channelRuntimeStore.cancelAllChannelWork);

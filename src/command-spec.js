@@ -1,4 +1,4 @@
-const ACTION_BUTTON_COMMAND_NAMES = Object.freeze(['status', 'sessions', 'queue', 'progress', 'new', 'cancel']);
+const ACTION_BUTTON_COMMAND_NAMES = Object.freeze(['status', 'sessions', 'queue', 'progress', 'new', 'cancel', 'retry']);
 
 const COMMAND_ALIASES = Object.freeze({
   abort: 'cancel',

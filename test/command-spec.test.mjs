@@ -16,7 +16,7 @@ test('normalizeCommandName maps text and slash aliases to canonical names', () =
 });
 
 test('getActionButtonCommandNames exposes canonical button-safe commands', () => {
-  assert.deepEqual(getActionButtonCommandNames(), ['status', 'sessions', 'queue', 'progress', 'new', 'cancel']);
+  assert.deepEqual(getActionButtonCommandNames(), ['status', 'sessions', 'queue', 'progress', 'new', 'cancel', 'retry']);
 });
 
 test('buildSlashCommandEntries includes aliases and provider toggle only in shared mode', () => {

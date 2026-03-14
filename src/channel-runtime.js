@@ -13,10 +13,15 @@ export function createChannelRuntimeStore({
         queue: [],
         activeRun: null,
         cancelRequested: false,
+        lastFailedPrompt: null,
       };
       channelStates.set(key, state);
     }
     return state;
+  }
+
+  function resolveChannelState(target) {
+    return typeof target === 'string' ? getChannelState(target) : target;
   }
 
   function setActiveRun(channelState, message, prompt, child, phase = 'exec') {
@@ -90,12 +95,30 @@ export function createChannelRuntimeStore({
     };
   }
 
+  function rememberFailedPrompt(target, failedPrompt) {
+    const state = resolveChannelState(target);
+    state.lastFailedPrompt = failedPrompt || null;
+    return state.lastFailedPrompt;
+  }
+
+  function clearLastFailedPrompt(target) {
+    const state = resolveChannelState(target);
+    state.lastFailedPrompt = null;
+  }
+
+  function getLastFailedPrompt(key) {
+    return getChannelState(key).lastFailedPrompt || null;
+  }
+
   return {
     getChannelState,
     setActiveRun,
     cancelChannelWork,
     cancelAllChannelWork,
     getRuntimeSnapshot,
+    rememberFailedPrompt,
+    clearLastFailedPrompt,
+    getLastFailedPrompt,
   };
 }
 

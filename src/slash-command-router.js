@@ -93,6 +93,7 @@ export function createSlashCommandRouter({
   parseTimeoutConfigAction,
   parseCompactConfigAction,
   cancelChannelWork,
+  retryLastPrompt,
   openWorkspaceBrowser,
   resolvePath,
   safeError,
@@ -484,6 +485,36 @@ export function createSlashCommandRouter({
     const outcome = cancelChannelWork(key, `slash_${commandName}`);
     await respond(withCommandActions({
       content: formatCancelReport(outcome),
+      flags: 64,
+    }, { key, session, userId: interaction.user.id }));
+  });
+
+  registerSlashHandlers(handlers, ['retry'], async ({ interaction, key, session, respond }) => {
+    if (typeof retryLastPrompt !== 'function') {
+      await respond(withCommandActions({
+        content: '❌ 当前环境未启用失败任务重试。',
+        flags: 64,
+      }, { key, session, userId: interaction.user.id }));
+      return;
+    }
+
+    const outcome = await retryLastPrompt(key, interaction.user.id);
+    if (!outcome?.enqueued) {
+      const content = outcome?.reason === 'queue_full' && Number.isFinite(outcome?.maxQueue)
+        ? `🚧 当前频道队列已满（上限 ${outcome.maxQueue}），请稍后再试。`
+        : '❌ 没有可重试的失败任务。';
+      await respond(withCommandActions({
+        content,
+        flags: 64,
+      }, { key, session, userId: interaction.user.id }));
+      return;
+    }
+
+    const content = outcome.queuedAhead > 0
+      ? `🔁 已重新加入队列，前面还有 ${outcome.queuedAhead} 条。`
+      : '🔁 已重新加入队列。';
+    await respond(withCommandActions({
+      content,
       flags: 64,
     }, { key, session, userId: interaction.user.id }));
   });

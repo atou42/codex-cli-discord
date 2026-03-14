@@ -1,4 +1,5 @@
 import { createPromptResultRenderer } from './prompt-result-renderer.js';
+import { withRetryAction } from './retry-action-button.js';
 
 export function createPromptOrchestrator({
   showReasoning = false,
@@ -307,7 +308,10 @@ export function createPromptOrchestrator({
           timedOut: Boolean(result.timedOut),
           error: result.error || `${getSessionProvider(session)} run failed`,
         };
-        await safeReply(message, failText);
+        await safeReply(
+          message,
+          withRetryAction(failText, message?.author?.id || null),
+        );
         return { ok: false, cancelled: false };
       }
 

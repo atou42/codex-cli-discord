@@ -36,6 +36,9 @@ export function createPromptRuntime({
     cancelChannelWork,
     cancelAllChannelWork,
     getRuntimeSnapshot,
+    rememberFailedPrompt,
+    clearLastFailedPrompt,
+    getLastFailedPrompt,
   } = channelRuntimeStore;
 
   const { startSessionProgressBridge } = createSessionProgressBridgeFactoryFn(sessionProgressBridgeOptions);
@@ -54,15 +57,19 @@ export function createPromptRuntime({
     setActiveRun,
     runTask: (options) => runCodex(options),
   });
-  const { enqueuePrompt } = createChannelQueueFn({
+  const { enqueuePrompt, retryLastPrompt } = createChannelQueueFn({
     ...channelQueueOptions,
     getChannelState,
     handlePrompt,
+    rememberFailedPrompt,
+    clearLastFailedPrompt,
+    getLastFailedPrompt,
   });
 
   return {
     ...presentation,
     enqueuePrompt,
+    retryLastPrompt,
     getChannelState,
     setActiveRun,
     cancelChannelWork,

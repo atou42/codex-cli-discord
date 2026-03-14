@@ -1,3 +1,5 @@
+import { withRetryAction } from './retry-action-button.js';
+
 export function createChannelQueue({
   getChannelState,
   getSession,
@@ -6,6 +8,9 @@ export function createChannelQueue({
   safeError,
   getCurrentUserId,
   handlePrompt,
+  rememberFailedPrompt = () => null,
+  clearLastFailedPrompt = () => {},
+  getLastFailedPrompt = () => null,
 } = {}) {
   function resolveCurrentUserId(message) {
     const explicit = String(getCurrentUserId?.() || '').trim();
@@ -27,7 +32,7 @@ export function createChannelQueue({
         message,
         `🚧 当前频道队列已满（上限 ${maxQueue}）。请稍后重试，或用 \`!queue\` / \`!abort\` 处理积压任务。`,
       );
-      return;
+      return { ok: false, enqueued: false, reason: 'queue_full', maxQueue };
     }
 
     const queuedAhead = (state.running ? 1 : 0) + state.queue.length;
@@ -46,6 +51,47 @@ export function createChannelQueue({
     }
 
     void processPromptQueue(key);
+    return { ok: true, enqueued: true, queuedAhead };
+  }
+
+  function createFailedPromptRecord(job, err = null) {
+    return {
+      message: job.message,
+      key: job.key,
+      content: job.content,
+      authorId: String(job?.message?.author?.id || '').trim() || null,
+      failedAt: Date.now(),
+      error: err ? safeError(err) : null,
+    };
+  }
+
+  async function retryLastPrompt(key, requesterUserId = null) {
+    const failedPrompt = getLastFailedPrompt(key);
+    if (!failedPrompt) {
+      return { ok: false, enqueued: false, reason: 'missing_failed_prompt' };
+    }
+    if (requesterUserId && failedPrompt.authorId && failedPrompt.authorId !== requesterUserId) {
+      return { ok: false, enqueued: false, reason: 'missing_failed_prompt' };
+    }
+
+    clearLastFailedPrompt(key);
+    try {
+      const result = await enqueuePrompt(failedPrompt.message, failedPrompt.key, failedPrompt.content);
+      if (!result?.enqueued) {
+        rememberFailedPrompt(key, failedPrompt);
+        return {
+          ok: false,
+          enqueued: false,
+          reason: result?.reason || 'enqueue_failed',
+          maxQueue: result?.maxQueue || null,
+        };
+      }
+
+      return { ok: true, enqueued: true, queuedAhead: result.queuedAhead || 0 };
+    } catch (err) {
+      rememberFailedPrompt(key, failedPrompt);
+      throw err;
+    }
   }
 
   async function processPromptQueue(key) {
@@ -82,17 +128,22 @@ export function createChannelQueue({
       } else if (outcome.cancelled) {
         await message.react('🛑').catch(() => {});
       } else {
+        rememberFailedPrompt(channelState, createFailedPromptRecord(job));
         await message.react('❌').catch(() => {});
       }
     } catch (err) {
       console.error('runPromptJob error:', err);
       try {
+        rememberFailedPrompt(channelState, createFailedPromptRecord(job, err));
         const currentUserId = resolveCurrentUserId(message);
         if (currentUserId) {
           await message.reactions.cache.get('⚡')?.users.remove(currentUserId).catch(() => {});
         }
         await message.react('❌').catch(() => {});
-        await safeReply(message, `❌ 处理失败：${safeError(err)}`);
+        await safeReply(
+          message,
+          withRetryAction(`❌ 处理失败：${safeError(err)}`, message?.author?.id || null),
+        );
       } catch {
         // ignore
       }
@@ -103,5 +154,6 @@ export function createChannelQueue({
 
   return {
     enqueuePrompt,
+    retryLastPrompt,
   };
 }

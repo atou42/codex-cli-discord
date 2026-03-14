@@ -25,7 +25,9 @@ function createRouterState() {
   const replies = [];
   let resetCalls = 0;
   const cancelCalls = [];
+  const retryCalls = [];
   const browseCalls = [];
+  let retryOutcome = { ok: true, enqueued: true, queuedAhead: 0 };
 
   const router = createSlashCommandRouter({
     slashRef: (name) => `/cx_${name}`,
@@ -95,6 +97,10 @@ function createRouterState() {
       cancelCalls.push(outcome);
       return outcome;
     },
+    retryLastPrompt: async (key, userId) => {
+      retryCalls.push({ key, userId });
+      return retryOutcome;
+    },
     openWorkspaceBrowser: ({ key, mode, userId }) => {
       const payload = { content: `browse:${mode}:${key}:${userId}`, components: [] };
       browseCalls.push(payload);
@@ -111,6 +117,10 @@ function createRouterState() {
     getBrowseCalls: () => [...browseCalls],
     getResetCalls: () => resetCalls,
     getCancelCalls: () => [...cancelCalls],
+    getRetryCalls: () => [...retryCalls],
+    setRetryOutcome: (value) => {
+      retryOutcome = value;
+    },
   };
 }
 
@@ -181,8 +191,30 @@ test('parseCommandActionButtonId decodes command buttons', () => {
     command: 'new',
     userId: '123456789',
   });
-  assert.equal(parseCommandActionButtonId('cmd:retry:123456789'), null);
+  assert.deepEqual(parseCommandActionButtonId('cmd:retry:123456789'), {
+    command: 'retry',
+    userId: '123456789',
+  });
   assert.equal(parseCommandActionButtonId('cmd:unknown:123456789'), null);
+});
+
+test('createSlashCommandRouter routes retry command through retry handler', async () => {
+  const state = createRouterState();
+
+  const handled = await state.router({
+    interaction: createInteraction('cx_retry'),
+    commandName: 'retry',
+    respond: async (payload) => {
+      state.replies.push(payload);
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(state.getRetryCalls(), [{ key: 'channel-1', userId: 'user-1' }]);
+  assert.deepEqual(state.replies, [{
+    content: '🔁 已重新加入队列。',
+    flags: 64,
+  }]);
 });
 
 test('createSlashCommandRouter rejects compact for non-codex providers', async () => {

@@ -17,6 +17,9 @@ function createMessage(id, replyLog, reactionLog) {
 
   return {
     id,
+    author: {
+      id: `user-${id}`,
+    },
     client: {
       user: {
         id: 'bot-user',
@@ -126,4 +129,145 @@ test('createChannelQueue falls back to message client user id when getCurrentUse
   await waitFor(() => runtime.getChannelState('thread-2').running === false);
 
   assert.deepEqual(message.removals, ['bot-user']);
+});
+
+test('createChannelQueue remembers failed prompts and can re-enqueue them', async () => {
+  const runtime = createChannelRuntimeStore({
+    cloneProgressPlan: (plan) => (plan ? JSON.parse(JSON.stringify(plan)) : null),
+    truncate: (text, max) => (text.length <= max ? text : `${text.slice(0, max - 3)}...`),
+  });
+  const replyLog = [];
+  const reactionLog = [];
+  const handled = [];
+  let attempts = 0;
+
+  const queue = createChannelQueue({
+    getChannelState: runtime.getChannelState,
+    getSession: () => ({ provider: 'codex' }),
+    resolveSecurityContext: () => ({ maxQueuePerChannel: 10 }),
+    safeReply: async (message, payload) => {
+      replyLog.push({ id: message.id, payload });
+    },
+    safeError: (error) => error.message,
+    getCurrentUserId: () => 'bot-user',
+    handlePrompt: async (_message, _key, content) => {
+      handled.push(content);
+      attempts += 1;
+      if (attempts === 1) {
+        return { ok: false, cancelled: false };
+      }
+      return { ok: true, cancelled: false };
+    },
+    rememberFailedPrompt: runtime.rememberFailedPrompt,
+    clearLastFailedPrompt: runtime.clearLastFailedPrompt,
+    getLastFailedPrompt: runtime.getLastFailedPrompt,
+  });
+
+  const message = createMessage('4', replyLog, reactionLog);
+  await queue.enqueuePrompt(message, 'thread-3', 'retry-me');
+  await waitFor(() => runtime.getChannelState('thread-3').running === false);
+
+  const failedPrompt = runtime.getLastFailedPrompt('thread-3');
+  assert.equal(failedPrompt?.content, 'retry-me');
+
+  const retryOutcome = await queue.retryLastPrompt('thread-3');
+  await waitFor(() => runtime.getChannelState('thread-3').running === false && handled.length === 2);
+
+  assert.deepEqual(retryOutcome, { ok: true, enqueued: true, queuedAhead: 0 });
+  assert.deepEqual(handled, ['retry-me', 'retry-me']);
+  assert.equal(runtime.getLastFailedPrompt('thread-3'), null);
+});
+
+test('createChannelQueue refuses retry when requester does not own the failed prompt', async () => {
+  const runtime = createChannelRuntimeStore({
+    cloneProgressPlan: (plan) => (plan ? JSON.parse(JSON.stringify(plan)) : null),
+    truncate: (text, max) => (text.length <= max ? text : `${text.slice(0, max - 3)}...`),
+  });
+  const replyLog = [];
+  const reactionLog = [];
+  const handled = [];
+
+  const queue = createChannelQueue({
+    getChannelState: runtime.getChannelState,
+    getSession: () => ({ provider: 'codex' }),
+    resolveSecurityContext: () => ({ maxQueuePerChannel: 10 }),
+    safeReply: async (message, payload) => {
+      replyLog.push({ id: message.id, payload });
+    },
+    safeError: (error) => error.message,
+    getCurrentUserId: () => 'bot-user',
+    handlePrompt: async (_message, _key, content) => {
+      handled.push(content);
+      return { ok: false, cancelled: false };
+    },
+    rememberFailedPrompt: runtime.rememberFailedPrompt,
+    clearLastFailedPrompt: runtime.clearLastFailedPrompt,
+    getLastFailedPrompt: runtime.getLastFailedPrompt,
+  });
+
+  const message = createMessage('6', replyLog, reactionLog);
+  await queue.enqueuePrompt(message, 'thread-5', 'private-retry');
+  await waitFor(() => runtime.getChannelState('thread-5').running === false);
+
+  const retryOutcome = await queue.retryLastPrompt('thread-5', 'user-other');
+
+  assert.deepEqual(retryOutcome, {
+    ok: false,
+    enqueued: false,
+    reason: 'missing_failed_prompt',
+  });
+  assert.deepEqual(handled, ['private-retry']);
+  assert.equal(runtime.getLastFailedPrompt('thread-5')?.content, 'private-retry');
+});
+
+test('createChannelQueue adds retry button when unexpected processing error bubbles out', async () => {
+  const runtime = createChannelRuntimeStore({
+    cloneProgressPlan: (plan) => (plan ? JSON.parse(JSON.stringify(plan)) : null),
+    truncate: (text, max) => (text.length <= max ? text : `${text.slice(0, max - 3)}...`),
+  });
+  const replyLog = [];
+  const reactionLog = [];
+
+  const queue = createChannelQueue({
+    getChannelState: runtime.getChannelState,
+    getSession: () => ({ provider: 'codex' }),
+    resolveSecurityContext: () => ({ maxQueuePerChannel: 10 }),
+    safeReply: async (message, payload) => {
+      replyLog.push({ id: message.id, payload });
+    },
+    safeError: (error) => error.message,
+    getCurrentUserId: () => 'bot-user',
+    handlePrompt: async () => {
+      throw new Error('boom');
+    },
+    rememberFailedPrompt: runtime.rememberFailedPrompt,
+    clearLastFailedPrompt: runtime.clearLastFailedPrompt,
+    getLastFailedPrompt: runtime.getLastFailedPrompt,
+  });
+
+  const message = createMessage('5', replyLog, reactionLog);
+  await queue.enqueuePrompt(message, 'thread-4', 'explode');
+  await waitFor(() => runtime.getChannelState('thread-4').running === false);
+
+  const failedPrompt = runtime.getLastFailedPrompt('thread-4');
+  assert.equal(failedPrompt?.content, 'explode');
+  assert.equal(failedPrompt?.error, 'boom');
+  assert.equal(reactionLog.some((entry) => entry.id === '5' && entry.emoji === '❌'), true);
+
+  const errorReply = replyLog.at(-1)?.payload;
+  assert.equal(typeof errorReply, 'object');
+  assert.equal(errorReply.content, '❌ 处理失败：boom');
+  assert.deepEqual(errorReply.components, [
+    {
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: 1,
+          label: 'Retry',
+          custom_id: 'cmd:retry:user-5',
+        },
+      ],
+    },
+  ]);
 });
