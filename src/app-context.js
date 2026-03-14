@@ -6,10 +6,12 @@ import { createSessionSettings } from './session-settings.js';
 import { createSessionIdentityHelpers } from './session-identity.js';
 import { createCommandSurface } from './command-surface.js';
 import { createWorkspaceRuntime } from './workspace-runtime.js';
+import { slashRef as slashRefBase } from './slash-command-surface.js';
 import { createDiscordAccessPolicy } from './discord-access-policy.js';
 import { createDiscordEntryHandlers } from './discord-entry-handlers.js';
 import { createDiscordLifecycle } from './discord-lifecycle.js';
 import { createSingleInstanceLock } from './single-instance-lock.js';
+import { formatWorkspaceBusyReport as formatWorkspaceBusyReportBase } from './workspace-busy-report.js';
 
 export function createAppContext({
   identityOptions = {},
@@ -64,12 +66,17 @@ export function createAppContext({
     resolveTimeoutSetting: sessionSettings.resolveTimeoutSetting,
   });
   const workspaceRuntime = createWorkspaceRuntimeFn(workspaceRuntimeOptions);
-
-  let lifecycle = null;
-  const commandSurfaceBindings = {
-    formatWorkspaceBusyReport: () => '⏳ Workspace busy',
-    slashRef: (base) => `/${base}`,
-  };
+  const promptSlashRef = (base) => slashRefBase(base, commandSurfaceOptions.slashPrefix || '');
+  const formatWorkspaceBusyReport = (session, workspaceDir, owner = null) => formatWorkspaceBusyReportBase(
+    session,
+    workspaceDir,
+    owner,
+    {
+      getSessionLanguage: sessionSettings.getSessionLanguage,
+      normalizeUiLanguage: promptOrchestratorOptions.normalizeUiLanguage,
+      humanAge: reportOptions.humanAge,
+    },
+  );
 
   const {
     runtimePresentationOptions = {},
@@ -116,14 +123,13 @@ export function createAppContext({
       resolveCompactEnabledSetting: sessionSettings.resolveCompactEnabledSetting,
       resolveCompactThresholdSetting: sessionSettings.resolveCompactThresholdSetting,
       acquireWorkspace: workspaceRuntime.acquireWorkspace,
-      formatWorkspaceBusyReport: (...args) => commandSurfaceBindings.formatWorkspaceBusyReport(...args),
-      slashRef: (...args) => commandSurfaceBindings.slashRef(...args),
+      formatWorkspaceBusyReport,
+      slashRef: promptSlashRef,
     },
     channelQueueOptions: {
       ...channelQueueOptions,
       getSession: sessionStore.getSession,
       resolveSecurityContext: securityPolicy.resolveSecurityContext,
-      getCurrentUserId: () => lifecycle?.getClient?.()?.user?.id,
     },
     factories: promptRuntimeFactories,
   });
@@ -225,9 +231,6 @@ export function createAppContext({
     },
   });
 
-  commandSurfaceBindings.formatWorkspaceBusyReport = commandSurface.formatWorkspaceBusyReport;
-  commandSurfaceBindings.slashRef = commandSurface.slashRef;
-
   const accessPolicy = createDiscordAccessPolicyFn(accessPolicyOptions);
   const entryHandlers = createDiscordEntryHandlersFn({
     ...entryHandlerOptions,
@@ -244,7 +247,7 @@ export function createAppContext({
     routeSlashCommand: commandSurface.routeSlashCommand,
     normalizeSlashCommandName: commandSurface.normalizeSlashCommandName,
   });
-  lifecycle = createDiscordLifecycleFn({
+  const lifecycle = createDiscordLifecycleFn({
     ...lifecycleOptions,
     bindClientHandlers: entryHandlers.bindClientHandlers,
     cancelAllChannelWork: promptRuntime.cancelAllChannelWork,

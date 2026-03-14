@@ -218,9 +218,16 @@ test('createAppContext wires factories and cross-links composition dependencies'
   assert.equal(calls.promptRuntime.promptOrchestratorOptions.getSession, sessionStore.getSession);
   assert.equal(calls.promptRuntime.promptOrchestratorOptions.resolveTimeoutSetting, sessionSettings.resolveTimeoutSetting);
   assert.equal(calls.promptRuntime.channelQueueOptions.resolveSecurityContext, securityPolicy.resolveSecurityContext);
-  assert.equal(calls.promptRuntime.channelQueueOptions.getCurrentUserId(), 'bot-user-1');
-  assert.equal(calls.promptRuntime.promptOrchestratorOptions.formatWorkspaceBusyReport(), 'busy');
-  assert.equal(calls.promptRuntime.promptOrchestratorOptions.slashRef('status'), '/bot-status');
+  assert.equal(calls.promptRuntime.channelQueueOptions.getCurrentUserId, undefined);
+  assert.match(
+    calls.promptRuntime.promptOrchestratorOptions.formatWorkspaceBusyReport(
+      { language: 'zh' },
+      '/repo/demo',
+      { provider: 'codex', key: 'thread-1' },
+    ),
+    /workspace 正忙/,
+  );
+  assert.equal(calls.promptRuntime.promptOrchestratorOptions.slashRef('status'), '/bot_status');
   assert.equal(calls.commandSurface.reportOptions.getRuntimeSnapshot, promptRuntime.getRuntimeSnapshot);
   assert.equal(calls.commandSurface.workspaceBrowserOptions.commandActions, commandActions);
   assert.equal(calls.commandSurface.slashRouterOptions.cancelChannelWork, promptRuntime.cancelChannelWork);

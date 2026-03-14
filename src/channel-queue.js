@@ -7,6 +7,17 @@ export function createChannelQueue({
   getCurrentUserId,
   handlePrompt,
 } = {}) {
+  function resolveCurrentUserId(message) {
+    const explicit = String(getCurrentUserId?.() || '').trim();
+    if (explicit) return explicit;
+    const fromClient = String(
+      message?.client?.user?.id
+      || message?.channel?.client?.user?.id
+      || '',
+    ).trim();
+    return fromClient || null;
+  }
+
   async function enqueuePrompt(message, key, content, securityContext = null) {
     const state = getChannelState(key);
     const security = securityContext || resolveSecurityContext(message.channel, getSession(key));
@@ -62,7 +73,10 @@ export function createChannelQueue({
     try {
       await message.react('⚡').catch(() => {});
       const outcome = await handlePrompt(message, key, content, channelState);
-      await message.reactions.cache.get('⚡')?.users.remove(getCurrentUserId?.()).catch(() => {});
+      const currentUserId = resolveCurrentUserId(message);
+      if (currentUserId) {
+        await message.reactions.cache.get('⚡')?.users.remove(currentUserId).catch(() => {});
+      }
       if (outcome.ok) {
         await message.react('✅').catch(() => {});
       } else if (outcome.cancelled) {
@@ -73,7 +87,10 @@ export function createChannelQueue({
     } catch (err) {
       console.error('runPromptJob error:', err);
       try {
-        await message.reactions.cache.get('⚡')?.users.remove(getCurrentUserId?.()).catch(() => {});
+        const currentUserId = resolveCurrentUserId(message);
+        if (currentUserId) {
+          await message.reactions.cache.get('⚡')?.users.remove(currentUserId).catch(() => {});
+        }
         await message.react('❌').catch(() => {});
         await safeReply(message, `❌ 处理失败：${safeError(err)}`);
       } catch {

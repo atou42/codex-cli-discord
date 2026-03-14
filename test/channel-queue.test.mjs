@@ -17,6 +17,11 @@ function createMessage(id, replyLog, reactionLog) {
 
   return {
     id,
+    client: {
+      user: {
+        id: 'bot-user',
+      },
+    },
     channel: { id: `channel-${id}` },
     reactions: { cache },
     async react(emoji) {
@@ -96,4 +101,29 @@ test('createChannelQueue processes queued prompts sequentially', async () => {
   assert.equal(reactionLog.filter((entry) => entry.emoji === '✅').length, 2);
   assert.deepEqual(firstMessage.removals, ['bot-user']);
   assert.deepEqual(secondMessage.removals, ['bot-user']);
+});
+
+test('createChannelQueue falls back to message client user id when getCurrentUserId is omitted', async () => {
+  const runtime = createChannelRuntimeStore({
+    cloneProgressPlan: (plan) => (plan ? JSON.parse(JSON.stringify(plan)) : null),
+    truncate: (text, max) => (text.length <= max ? text : `${text.slice(0, max - 3)}...`),
+  });
+  const replyLog = [];
+  const reactionLog = [];
+  const queue = createChannelQueue({
+    getChannelState: runtime.getChannelState,
+    getSession: () => ({ provider: 'codex' }),
+    resolveSecurityContext: () => ({ maxQueuePerChannel: 10 }),
+    safeReply: async (message, payload) => {
+      replyLog.push({ id: message.id, payload });
+    },
+    safeError: (error) => error.message,
+    handlePrompt: async () => ({ ok: true, cancelled: false }),
+  });
+
+  const message = createMessage('3', replyLog, reactionLog);
+  await queue.enqueuePrompt(message, 'thread-2', 'third');
+  await waitFor(() => runtime.getChannelState('thread-2').running === false);
+
+  assert.deepEqual(message.removals, ['bot-user']);
 });
