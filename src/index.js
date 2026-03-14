@@ -82,6 +82,9 @@ import {
 import {
   parseCommandActionButtonId,
 } from './slash-command-router.js';
+import {
+  registerSlashCommands,
+} from './slash-command-surface.js';
 import * as discordMessageInput from './discord-message-input.js';
 import {
   configureRuntimeProxy,
