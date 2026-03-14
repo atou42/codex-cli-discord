@@ -8,6 +8,7 @@ test('createPromptRuntime wires presentation runtime runner orchestrator and que
     channelQueue: null,
     channelRuntimeStore: null,
     promptOrchestrator: null,
+    progressReporterFactory: null,
     runtimePresentation: null,
     runnerExecutor: null,
     sessionProgressBridge: null,
@@ -56,6 +57,14 @@ test('createPromptRuntime wires presentation runtime runner orchestrator and que
   const channelQueue = {
     enqueuePrompt: () => 'queued-prompt',
   };
+  const createProgressReporter = () => ({
+    async start() {},
+    sync() {},
+    setLatestStep() {},
+    onEvent() {},
+    onLog() {},
+    async finish() {},
+  });
 
   const runtime = createPromptRuntime({
     runtimePresentationOptions: { showReasoning: true },
@@ -87,6 +96,10 @@ test('createPromptRuntime wires presentation runtime runner orchestrator and que
         calls.promptOrchestrator = options;
         return promptOrchestrator;
       },
+      createPromptProgressReporterFactoryFn: (options) => {
+        calls.progressReporterFactory = options;
+        return createProgressReporter;
+      },
       createRuntimePresentationFn: (options) => {
         calls.runtimePresentation = options;
         return presentation;
@@ -105,9 +118,10 @@ test('createPromptRuntime wires presentation runtime runner orchestrator and que
   assert.deepEqual(calls.runtimePresentation, { showReasoning: true });
   assert.equal(calls.channelRuntimeStore.cloneProgressPlan, presentation.cloneProgressPlan);
   assert.equal(calls.runnerExecutor.startSessionProgressBridge, bridgeFactory.startSessionProgressBridge);
+  assert.equal(calls.progressReporterFactory.presentation, presentation);
+  assert.equal(calls.progressReporterFactory.safeReply, undefined);
   assert.equal(calls.promptOrchestrator.setActiveRun, channelRuntimeStore.setActiveRun);
-  assert.equal(calls.promptOrchestrator.summarizeCodexEvent, presentation.summarizeCodexEvent);
-  assert.equal(calls.promptOrchestrator.renderCompletedStepsLines, presentation.renderCompletedStepsLines);
+  assert.equal(calls.promptOrchestrator.createProgressReporter, createProgressReporter);
   assert.equal(calls.promptOrchestrator.formatTimeoutLabel, presentation.formatTimeoutLabel);
   assert.equal(calls.channelQueue.getChannelState, channelRuntimeStore.getChannelState);
   assert.equal(calls.channelQueue.handlePrompt, promptOrchestrator.handlePrompt);

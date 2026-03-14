@@ -1,6 +1,7 @@
 import { createChannelQueue } from './channel-queue.js';
 import { createChannelRuntimeStore } from './channel-runtime.js';
 import { createPromptOrchestrator } from './prompt-orchestrator.js';
+import { createPromptProgressReporterFactory } from './prompt-progress-reporter.js';
 import { createRuntimePresentation } from './runtime-presentation.js';
 import { createRunnerExecutor } from './runner-executor.js';
 import { createSessionProgressBridgeFactory } from './session-progress-bridge.js';
@@ -18,6 +19,7 @@ export function createPromptRuntime({
     createChannelQueueFn = createChannelQueue,
     createChannelRuntimeStoreFn = createChannelRuntimeStore,
     createPromptOrchestratorFn = createPromptOrchestrator,
+    createPromptProgressReporterFactoryFn = createPromptProgressReporterFactory,
     createRuntimePresentationFn = createRuntimePresentation,
     createRunnerExecutorFn = createRunnerExecutor,
     createSessionProgressBridgeFactoryFn = createSessionProgressBridgeFactory,
@@ -41,24 +43,16 @@ export function createPromptRuntime({
     ...runnerExecutorOptions,
     startSessionProgressBridge,
   });
+  const createProgressReporter = createPromptProgressReporterFactoryFn({
+    ...promptOrchestratorOptions,
+    presentation,
+  });
   const { handlePrompt } = createPromptOrchestratorFn({
     ...promptOrchestratorOptions,
+    createProgressReporter,
     formatTimeoutLabel: presentation.formatTimeoutLabel,
     setActiveRun,
     runTask: (options) => runCodex(options),
-    summarizeCodexEvent: presentation.summarizeCodexEvent,
-    extractRawProgressTextFromEvent: presentation.extractRawProgressTextFromEvent,
-    cloneProgressPlan: presentation.cloneProgressPlan,
-    extractPlanStateFromEvent: presentation.extractPlanStateFromEvent,
-    extractCompletedStepFromEvent: presentation.extractCompletedStepFromEvent,
-    appendCompletedStep: presentation.appendCompletedStep,
-    appendRecentActivity: presentation.appendRecentActivity,
-    formatProgressPlanSummary: presentation.formatProgressPlanSummary,
-    renderProcessContentLines: presentation.renderProcessContentLines,
-    localizeProgressLines: presentation.localizeProgressLines,
-    renderProgressPlanLines: presentation.renderProgressPlanLines,
-    renderCompletedStepsLines: presentation.renderCompletedStepsLines,
-    formatRuntimePhaseLabel: presentation.formatRuntimePhaseLabel,
   });
   const { enqueuePrompt } = createChannelQueueFn({
     ...channelQueueOptions,

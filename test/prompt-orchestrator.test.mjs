@@ -5,6 +5,7 @@ import { createPromptOrchestrator } from '../src/prompt-orchestrator.js';
 
 function createOrchestrator(overrides = {}) {
   const replyLog = [];
+  const progressCalls = [];
   let saveCount = 0;
   const session = {
     provider: 'codex',
@@ -16,21 +17,28 @@ function createOrchestrator(overrides = {}) {
   };
 
   const deps = {
-    defaultUiLanguage: 'zh',
-    progressUpdatesEnabled: false,
-    progressProcessLines: 2,
-    progressUpdateIntervalMs: 1000,
-    progressEventFlushMs: 100,
-    progressEventDedupeWindowMs: 100,
-    progressIncludeStdout: true,
-    progressIncludeStderr: false,
-    progressTextPreviewChars: 120,
-    progressProcessPushIntervalMs: 100,
-    progressMessageMaxChars: 1800,
-    progressPlanMaxLines: 4,
-    progressDoneStepsMax: 4,
     showReasoning: true,
     resultChunkChars: 1900,
+    createProgressReporter: ({ initialLatestStep }) => ({
+      async start() {
+        progressCalls.push({ type: 'start', initialLatestStep });
+      },
+      sync(options = {}) {
+        progressCalls.push({ type: 'sync', options });
+      },
+      setLatestStep(text) {
+        progressCalls.push({ type: 'setLatestStep', text });
+      },
+      onEvent(event) {
+        progressCalls.push({ type: 'onEvent', event });
+      },
+      onLog(line, source) {
+        progressCalls.push({ type: 'onLog', line, source });
+      },
+      async finish(outcome) {
+        progressCalls.push({ type: 'finish', outcome });
+      },
+    }),
     safeReply: async (_message, payload) => {
       replyLog.push(payload);
       return { id: `reply-${replyLog.length}`, edit: async () => {} };
@@ -78,19 +86,22 @@ function createOrchestrator(overrides = {}) {
     },
     acquireWorkspace: async () => ({ acquired: true, aborted: false, release() {} }),
     stopChildProcess: () => {},
-    runTask: async () => ({
-      ok: true,
-      cancelled: false,
-      timedOut: false,
-      error: '',
-      logs: [],
-      notes: [],
-      reasonings: ['thinking'],
-      messages: ['done'],
-      finalAnswerMessages: ['final answer'],
-      threadId: 'sess-2',
-      usage: { input_tokens: 321 },
-    }),
+    runTask: async (options) => {
+      options.onSpawn?.({ pid: 123 });
+      return {
+        ok: true,
+        cancelled: false,
+        timedOut: false,
+        error: '',
+        logs: [],
+        notes: [],
+        reasonings: ['thinking'],
+        messages: ['done'],
+        finalAnswerMessages: ['final answer'],
+        threadId: 'sess-2',
+        usage: { input_tokens: 321 },
+      };
+    },
     isCliNotFound: () => false,
     slashRef: (name) => `/bot-${name}`,
     safeError: (err) => err?.message || String(err),
@@ -99,22 +110,6 @@ function createOrchestrator(overrides = {}) {
       const n = Number(value);
       return Number.isFinite(n) ? Math.floor(n) : null;
     },
-    humanElapsed: () => '1s',
-    summarizeCodexEvent: () => '',
-    extractRawProgressTextFromEvent: () => '',
-    cloneProgressPlan: (plan) => plan,
-    extractPlanStateFromEvent: () => null,
-    extractCompletedStepFromEvent: () => null,
-    appendCompletedStep: () => {},
-    appendRecentActivity: () => {},
-    formatProgressPlanSummary: () => '',
-    renderProcessContentLines: () => [],
-    localizeProgressLines: (lines) => lines,
-    renderProgressPlanLines: () => [],
-    renderCompletedStepsLines: () => [],
-    formatRuntimePhaseLabel: () => 'exec',
-    createProgressEventDeduper: () => () => false,
-    buildProgressEventDedupeKey: () => 'key',
     extractInputTokensFromUsage: (usage) => usage?.input_tokens ?? null,
     composeFinalAnswerText: ({ finalAnswerMessages }) => finalAnswerMessages.join('\n\n'),
   };
@@ -122,6 +117,7 @@ function createOrchestrator(overrides = {}) {
   return {
     session,
     replyLog,
+    progressCalls,
     get saveCount() {
       return saveCount;
     },
@@ -159,7 +155,7 @@ test('createPromptOrchestrator.composeResultText renders reasoning answer notes 
 
 test('createPromptOrchestrator.handlePrompt runs task updates session and replies with result', async () => {
   const harness = createOrchestrator();
-  const { session, replyLog, orchestrator } = harness;
+  const { session, replyLog, progressCalls, orchestrator } = harness;
   const message = {
     id: 'msg-1',
     channel: {
@@ -181,4 +177,20 @@ test('createPromptOrchestrator.handlePrompt runs task updates session and replie
   assert.equal(replyLog.length, 1);
   assert.match(replyLog[0], /final answer/);
   assert.match(replyLog[0], /• session: \*\*demo\*\* \(`sess-2`\)/);
+  assert.deepEqual(progressCalls[0], {
+    type: 'start',
+    initialLatestStep: '等待 workspace 锁：/repo/demo',
+  });
+  assert.deepEqual(progressCalls[1], {
+    type: 'setLatestStep',
+    text: '已获取 workspace 锁：/repo/demo',
+  });
+  assert.deepEqual(progressCalls[2], {
+    type: 'sync',
+    options: { forceEmit: true },
+  });
+  assert.deepEqual(progressCalls[3], {
+    type: 'finish',
+    outcome: { ok: true, cancelled: false, timedOut: false, error: '' },
+  });
 });
