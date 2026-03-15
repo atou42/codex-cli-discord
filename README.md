@@ -69,7 +69,7 @@ Git hooks 说明：
 - `/cx_model <name|default>` - 设置模型覆盖
 - `/cx_effort <high|medium|low|default>` - 设置推理强度
 - `/cx_effort <xhigh|high|medium|low|default>` - 设置 reasoning effort
-- `/cx_compact key:<status|strategy|token_limit|native_limit|enabled|reset> value:<...>` - 配置当前频道 compact（仅 Codex）
+- `/cx_compact key:<status|strategy|token_limit|native_limit|enabled|reset> value:<...>` - 配置当前频道 compact（默认推荐 `native`；`native_limit` 仅在 provider 暴露原生 limit 覆盖时可用）
 - `/cx_mode <safe|dangerous>` - 设置执行模式
 - `/cx_name <label>` - 命名会话（用于显示）
 - `/cx_new` - 切到新会话，但保留当前频道配置
@@ -126,7 +126,9 @@ npm run start:gemini
 - `CODEX__SLASH_PREFIX` / `CLAUDE__SLASH_PREFIX` / `GEMINI__SLASH_PREFIX`：独立 bot 的 slash 前缀覆盖；默认分别是 Codex=`cx`、Claude=`cc`、Gemini=`gm`
 - `DEFAULT_UI_LANGUAGE`：新频道默认提示语言（`zh` 或 `en`，默认 `zh`）
 - `ONBOARDING_ENABLED_DEFAULT`：新频道 onboarding 默认开关（`true` 或 `false`，默认 `true`）
-- `DEFAULT_MODE`：`safe` 或 `dangerous`；独立 bot 建议分别写成 `CODEX__DEFAULT_MODE` / `CLAUDE__DEFAULT_MODE` / `GEMINI__DEFAULT_MODE`
+- `DEFAULT_MODE`：`safe` 或 `dangerous`；示例 `.env` 里 **默认用 `dangerous`**，方便本地全功能开发。生产 / 多人环境建议：
+  - 把 `.env` 里的 `CODEX__DEFAULT_MODE` / `CLAUDE__DEFAULT_MODE` / `GEMINI__DEFAULT_MODE` 改回 `safe`，只在需要的频道用 `/cx_mode dangerous` 开启
+  - 或者在只对自己可见的服务器里跑 `dangerous`，避免误操作影响团队
 - `DEFAULT_WORKSPACE_DIR`：所有 provider 共用的默认 workspace（可选）
 - `CODEX__DEFAULT_WORKSPACE_DIR` / `CLAUDE__DEFAULT_WORKSPACE_DIR` / `GEMINI__DEFAULT_WORKSPACE_DIR`：provider 级默认 workspace
 - `WORKSPACE_ROOT`：仅在未配置 thread 覆盖与 provider 默认目录时，作为 legacy 回退目录根路径
@@ -147,13 +149,15 @@ npm run start:gemini
 - `SELF_HEAL_RESTART_DELAY_MS`：自愈重启前延迟（默认 `5000`）
 - `SELF_HEAL_MAX_LOGIN_BACKOFF_MS`：Discord 登录重试最大退避（默认 `60000`）
 - `MAX_INPUT_TOKENS_BEFORE_COMPACT`：触发 compact 的阈值
-- `COMPACT_STRATEGY`：`hard | native | off`
+- `COMPACT_STRATEGY`：`hard | native | off`（默认 `native`）
   - `hard`：Bot 先总结，再切换到新会话
   - `native`：给 Codex CLI 传 `model_auto_compact_token_limit`，继续同一会话
   - `off`：关闭 compact 行为
 - 也可以通过 `/cx_compact` 或 `!compact` 在频道级覆盖 compact strategy
 - `COMPACT_ON_THRESHOLD`：是否启用阈值触发的 compact 逻辑
 - 频道级 compact 配置支持：`strategy`、`token_limit`、`native_limit`、`enabled`、`reset`、`status`
+  - 三家 provider 都支持 `native`
+  - `native_limit` 仅在 CLI 暴露原生 token limit 覆盖面时可用（当前主要是 Codex）
 
 ## Codex CLI 自动升级（可选调度适配器）
 
