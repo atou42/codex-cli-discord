@@ -1,11 +1,12 @@
-import { providerBindsSessionsToWorkspace } from './provider-metadata.js';
+import { providerRequiresWorkspaceBoundSession } from './provider-metadata.js';
+import { switchSessionProviderState } from './session-provider-state.js';
 
 function hasWorkspaceChanged(previousDir, nextDir) {
   return String(previousDir || '') !== String(nextDir || '');
 }
 
 function shouldResetSessionForWorkspaceChange(provider, previousDir, nextDir) {
-  return providerBindsSessionsToWorkspace(provider) && hasWorkspaceChanged(previousDir, nextDir);
+  return providerRequiresWorkspaceBoundSession(provider) && hasWorkspaceChanged(previousDir, nextDir);
 }
 
 export function createSessionCommandActions({
@@ -15,11 +16,23 @@ export function createSessionCommandActions({
   listStoredSessions = () => [],
   resolveProviderDefaultWorkspace = () => ({ workspaceDir: null, source: 'unset', envKey: null }),
   setProviderDefaultWorkspace = () => ({ workspaceDir: null, source: 'unset', envKey: null }),
+  normalizeProvider = (provider) => String(provider || '').trim().toLowerCase() || 'codex',
   clearSessionId,
   getSessionId,
   setSessionId,
   getSessionProvider,
-  getProviderShortName,
+  getSessionLanguage = () => 'zh',
+  normalizeUiLanguage = (value) => (String(value || '').trim().toLowerCase() === 'en' ? 'en' : 'zh'),
+  getProviderShortName = (provider) => String(provider || ''),
+  formatProviderSessionLabel = (provider, language = 'en', { plural = false } = {}) => (
+    language === 'en'
+      ? `${getProviderShortName(provider)} ${plural ? 'sessions' : 'session'}`
+      : `${getProviderShortName(provider)} ${plural ? 'sessions' : 'session'}`
+  ),
+  formatRecentSessionsTitle = (provider, language = 'en') => (
+    language === 'en' ? `Recent ${getProviderShortName(provider)} Sessions` : `最近 ${getProviderShortName(provider)} Sessions`
+  ),
+  formatRecentSessionsLookup = () => '',
   resolveTimeoutSetting,
   listRecentSessions,
   humanAge,
@@ -49,11 +62,9 @@ export function createSessionCommandActions({
   }
 
   function setProvider(session, requested) {
-    const previous = getSessionProvider(session);
-    session.provider = requested;
-    clearSessionId(session);
+    const { previous, provider } = switchSessionProviderState(session, requested, { normalizeProvider });
     saveDb();
-    return { previous, provider: requested };
+    return { previous, provider };
   }
 
   function setModel(session, name) {
@@ -109,10 +120,12 @@ export function createSessionCommandActions({
   }
 
   function bindSession(session, sessionId) {
+    const provider = getSessionProvider(session);
     setSessionId(session, sessionId);
     saveDb();
     return {
-      providerLabel: getProviderShortName(getSessionProvider(session)),
+      provider,
+      providerLabel: getProviderShortName(provider),
       sessionId: getSessionId(session),
     };
   }
@@ -175,7 +188,7 @@ export function createSessionCommandActions({
     let currentThreadChanged = false;
     let currentSessionReset = false;
 
-    if (providerBindsSessionsToWorkspace(provider)) {
+    if (providerRequiresWorkspaceBoundSession(provider)) {
       for (const { key, session: storedSession } of trackedSessions) {
         const before = beforeBindings.get(key);
         const after = getWorkspaceBinding(storedSession, key);
@@ -229,18 +242,29 @@ export function createSessionCommandActions({
 
   function formatRecentSessionsReport({ key, session, resumeRef = '!resume <id>', limit = 10 } = {}) {
     const provider = getSessionProvider(session);
+    const language = normalizeUiLanguage(getSessionLanguage(session));
     const sessions = listRecentSessions({ provider, workspaceDir: ensureWorkspace(session, key), limit });
     if (!sessions.length) {
-      return `没有找到任何 ${getProviderShortName(provider)} session。`;
+      return language === 'en'
+        ? `No recent ${formatProviderSessionLabel(provider, language)} found.`
+        : `没有找到任何 ${formatProviderSessionLabel(provider, language, { plural: true })}。`;
     }
+    const lookup = formatRecentSessionsLookup(provider, language);
     const lines = sessions.map((entry, index) => {
       const ago = humanAge(Date.now() - entry.mtime);
-      return `${index + 1}. \`${entry.id}\` (${ago} ago)`;
+      return language === 'en'
+        ? `${index + 1}. \`${entry.id}\` (${ago} ago)`
+        : `${index + 1}. \`${entry.id}\`（${ago}前）`;
     });
     return [
-      `**最近 ${getProviderShortName(provider)} Sessions**（用 \`${resumeRef}\` 继承）`,
+      language === 'en'
+        ? `**${formatRecentSessionsTitle(provider, language)}** (resume with \`${resumeRef}\`)`
+        : `**${formatRecentSessionsTitle(provider, language)}**（用 \`${resumeRef}\` 继承）`,
+      lookup
+        ? (language === 'en' ? `• source: ${lookup}` : `• 来源：${lookup}`)
+        : null,
       ...lines,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   return {

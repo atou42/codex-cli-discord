@@ -1,6 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  commitSessionProviderState,
+  ensureSessionProviderStates,
+  projectSessionProviderState,
+  switchSessionProviderState,
+} from './session-provider-state.js';
+
+const SESSION_PROVIDER_STATE_READY = Symbol('sessionProviderStateReady');
 
 export function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -20,6 +28,13 @@ function normalizeWorkspaceDir(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
   return path.resolve(raw);
+}
+
+function normalizeSessionMode(value, fallback = 'safe') {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'dangerous') return 'dangerous';
+  if (raw === 'safe') return 'safe';
+  return fallback === 'dangerous' ? 'dangerous' : 'safe';
 }
 
 function normalizeWorkspaceFavoritesMap(value, normalizeProvider) {
@@ -90,6 +105,12 @@ export function createSessionStore({
   }
 
   function saveDb() {
+    if (db?.threads && typeof db.threads === 'object') {
+      for (const session of Object.values(db.threads)) {
+        if (!session?.[SESSION_PROVIDER_STATE_READY]) continue;
+        commitSessionProviderState(session, { normalizeProvider });
+      }
+    }
     fs.writeFileSync(dataFile, JSON.stringify(db, null, 2));
   }
 
@@ -97,9 +118,15 @@ export function createSessionStore({
     saveDb();
   }
 
-  function getSession(key) {
+  function hydrateSession(key, {
+    createIfMissing = false,
+    touchUpdatedAt = false,
+  } = {}) {
     db.threads ||= {};
     if (!db.threads[key]) {
+      if (!createIfMissing) {
+        return { session: null, migrated: false };
+      }
       db.threads[key] = {
         workspaceDir: null,
         provider: defaults.provider,
@@ -120,24 +147,45 @@ export function createSessionStore({
         configOverrides: [],
         updatedAt: new Date().toISOString(),
       };
-      saveDb();
     }
 
     const session = db.threads[key];
-    let migrated = false;
+    const providerStateReady = session[SESSION_PROVIDER_STATE_READY] === true;
+    let migrated = !providerStateReady;
+    const defaultMode = normalizeSessionMode(defaults?.mode, 'safe');
 
-    if (botProvider && session.provider !== botProvider) {
-      session.provider = botProvider;
-      migrated = true;
-    }
     if (session.provider === undefined) {
       session.provider = defaults.provider;
+      migrated = true;
+    }
+    const ensuredProviderState = ensureSessionProviderStates(session, {
+      normalizeProvider,
+      provider: session.provider,
+      hydrateFromTopLevel: !providerStateReady,
+    });
+    if (session.provider !== ensuredProviderState.provider) {
+      session.provider = ensuredProviderState.provider;
+      migrated = true;
+    }
+    if (!providerStateReady) {
+      projectSessionProviderState(session, {
+        normalizeProvider,
+        provider: session.provider,
+      });
+    }
+    if (botProvider && session.provider !== botProvider) {
+      switchSessionProviderState(session, botProvider, { normalizeProvider });
       migrated = true;
     }
 
     const normalizedProvider = normalizeProvider(session.provider);
     if (session.provider !== normalizedProvider) {
       session.provider = normalizedProvider;
+      migrated = true;
+    }
+    const normalizedMode = normalizeSessionMode(session.mode, defaultMode);
+    if (session.mode !== normalizedMode) {
+      session.mode = normalizedMode;
       migrated = true;
     }
     if (session.runnerSessionId === undefined) {
@@ -264,7 +312,26 @@ export function createSessionStore({
       migrated = true;
     }
 
-    session.updatedAt = new Date().toISOString();
+    commitSessionProviderState(session, {
+      normalizeProvider,
+      provider: session.provider,
+    });
+    projectSessionProviderState(session, {
+      normalizeProvider,
+      provider: session.provider,
+    });
+    session[SESSION_PROVIDER_STATE_READY] = true;
+    if (touchUpdatedAt) {
+      session.updatedAt = new Date().toISOString();
+    }
+    return { session, migrated };
+  }
+
+  function getSession(key) {
+    const { session, migrated } = hydrateSession(key, {
+      createIfMissing: true,
+      touchUpdatedAt: true,
+    });
     if (migrated) saveDb();
     return session;
   }
@@ -331,8 +398,15 @@ export function createSessionStore({
   function listSessions({ provider = null } = {}) {
     db.threads ||= {};
     const normalizedProvider = provider ? normalizeProvider(provider) : null;
-    return Object.entries(db.threads)
-      .map(([key, session]) => ({ key, session }))
+    return Object.keys(db.threads)
+      .map((key) => {
+        const { session } = hydrateSession(key, {
+          createIfMissing: false,
+          touchUpdatedAt: false,
+        });
+        return session ? { key, session } : null;
+      })
+      .filter(Boolean)
       .filter(({ session }) => !normalizedProvider || normalizeProvider(session?.provider || defaults.provider) === normalizedProvider);
   }
 

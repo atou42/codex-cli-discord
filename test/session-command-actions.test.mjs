@@ -47,6 +47,73 @@ test('createSessionCommandActions.setProvider clears bound session and persists'
   assert.equal(saveCount, 1);
 });
 
+test('createSessionCommandActions.setProvider restores preserved provider-scoped session state', () => {
+  let saveCount = 0;
+  const actions = createSessionCommandActions({
+    saveDb: () => {
+      saveCount += 1;
+    },
+    ensureWorkspace: () => '/tmp/workspace',
+    normalizeProvider: (provider) => String(provider || '').trim().toLowerCase() || 'codex',
+    clearSessionId: (session) => {
+      session.runnerSessionId = null;
+      session.codexThreadId = null;
+    },
+    getSessionId: (session) => session.runnerSessionId,
+    setSessionId: (session, value) => {
+      session.runnerSessionId = value;
+      session.codexThreadId = value;
+    },
+    getSessionProvider: (session) => session.provider || 'codex',
+    getProviderShortName: (provider) => provider === 'claude' ? 'Claude' : 'Codex',
+    resolveTimeoutSetting: () => ({ timeoutMs: 60000, source: 'session override' }),
+    listRecentSessions: () => [],
+    humanAge: () => '0s',
+  });
+  const session = {
+    provider: 'codex',
+    runnerSessionId: 'sess-codex',
+    codexThreadId: 'sess-codex',
+    model: 'gpt-5.3-codex',
+    providers: {
+      codex: {
+        runnerSessionId: 'sess-codex',
+        codexThreadId: 'sess-codex',
+        lastInputTokens: 111,
+        model: 'gpt-5.3-codex',
+        effort: 'high',
+        compactStrategy: 'native',
+        compactEnabled: true,
+        compactThresholdTokens: 1000,
+        nativeCompactTokenLimit: 1000,
+        configOverrides: ['personality="concise"'],
+      },
+      claude: {
+        runnerSessionId: 'sess-claude',
+        codexThreadId: 'sess-claude',
+        lastInputTokens: 222,
+        model: 'sonnet',
+        effort: 'medium',
+        compactStrategy: 'hard',
+        compactEnabled: true,
+        compactThresholdTokens: 2000,
+        nativeCompactTokenLimit: null,
+        configOverrides: [],
+      },
+    },
+  };
+
+  const result = actions.setProvider(session, 'claude');
+
+  assert.equal(result.previous, 'codex');
+  assert.equal(result.provider, 'claude');
+  assert.equal(session.provider, 'claude');
+  assert.equal(session.runnerSessionId, 'sess-claude');
+  assert.equal(session.model, 'sonnet');
+  assert.equal(session.providers.codex.runnerSessionId, 'sess-codex');
+  assert.equal(saveCount, 1);
+});
+
 test('createSessionCommandActions.setWorkspaceDir resets codex session when workspace changes', () => {
   let saveCount = 0;
   const defaultState = { value: '/shared' };
@@ -238,7 +305,14 @@ test('createSessionCommandActions.formatRecentSessionsReport renders resume hint
     getSessionId: () => null,
     setSessionId: () => {},
     getSessionProvider: (session) => session.provider || 'codex',
+    getSessionLanguage: () => 'en',
     getProviderShortName: (provider) => provider === 'claude' ? 'Claude' : 'Codex',
+    formatRecentSessionsTitle: (provider) => provider === 'claude' ? 'Recent Claude Project Sessions' : 'Recent Codex Sessions',
+    formatRecentSessionsLookup: (provider) => (
+      provider === 'claude'
+        ? 'prefers current workspace in `~/.claude/projects/<workspace>`'
+        : 'global rollout history in `~/.codex/sessions`'
+    ),
     resolveTimeoutSetting: () => ({ timeoutMs: 60000, source: 'session override' }),
     listRecentSessions: () => [
       { id: 'abc123', mtime: Date.now() - 1_000 },
@@ -246,7 +320,7 @@ test('createSessionCommandActions.formatRecentSessionsReport renders resume hint
     ],
     humanAge: (ms) => `${Math.round(ms / 1000)}s`,
   });
-  const session = { provider: 'codex' };
+  const session = { provider: 'claude', language: 'en' };
 
   const report = actions.formatRecentSessionsReport({
     key: 'thread-1',
@@ -254,8 +328,9 @@ test('createSessionCommandActions.formatRecentSessionsReport renders resume hint
     resumeRef: '/bot-resume',
   });
 
-  assert.match(report, /最近 Codex Sessions/);
+  assert.match(report, /Recent Claude Project Sessions/);
   assert.match(report, /`\/bot-resume`/);
+  assert.match(report, /source: prefers current workspace in `~\/\.claude\/projects\/<workspace>`/);
   assert.match(report, /1\. `abc123`/);
   assert.match(report, /2\. `def456`/);
 });

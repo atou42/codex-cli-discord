@@ -118,12 +118,17 @@ test('session-settings provides compact descriptions and provider defaults', () 
   const settings = createSessionSettings({
     readCodexDefaults: () => ({ model: 'gpt-5-codex', effort: 'high' }),
     normalizeProvider: (provider) => String(provider || '').trim().toLowerCase() || 'codex',
+    getSupportedCompactStrategies: () => ['hard', 'native', 'off'],
   });
 
   assert.equal(normalizeCompactStrategy('native'), 'native');
   assert.equal(normalizeCompactStrategy('weird', { logger: { warn: (line) => warnings.push(line) } }), 'hard');
   assert.match(warnings[0], /Unknown COMPACT_STRATEGY=weird/);
-  assert.equal(describeCompactStrategy('native', 'zh'), 'native（Codex CLI 自动压缩并继续当前 session）');
+  assert.equal(describeCompactStrategy('native', 'zh'), 'native（由 provider CLI 原生压缩并继续当前 session）');
+  assert.deepEqual(settings.resolveCompactStrategySetting({ provider: 'gemini' }), {
+    strategy: 'native',
+    source: 'env default',
+  });
   assert.deepEqual(settings.getProviderDefaults('codex'), {
     model: 'gpt-5-codex',
     effort: 'high',

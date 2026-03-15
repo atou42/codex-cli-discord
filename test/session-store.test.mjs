@@ -181,6 +181,242 @@ test('createSessionStore migrates persisted legacy thread workspace to null so d
   assert.equal('processLines' in session, false);
 });
 
+test('createSessionStore backfills missing mode from defaults', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cli-discord-session-store-'));
+  const dataFile = path.join(root, 'sessions.json');
+  const workspaceRoot = path.join(root, 'workspaces');
+  fs.writeFileSync(dataFile, JSON.stringify({
+    threads: {
+      'thread-1': {
+        provider: 'codex',
+        runnerSessionId: 'sess-1',
+        codexThreadId: 'sess-1',
+        language: 'zh',
+        onboardingEnabled: true,
+      },
+    },
+  }, null, 2));
+
+  const store = createSessionStore({
+    dataFile,
+    workspaceRoot,
+    defaults: {
+      provider: 'codex',
+      mode: 'dangerous',
+      language: 'zh',
+      onboardingEnabled: true,
+    },
+    getSessionId: (session) => String(session?.runnerSessionId || session?.codexThreadId || '').trim() || null,
+    normalizeProvider,
+    normalizeUiLanguage,
+    normalizeSessionSecurityProfile,
+    normalizeSessionTimeoutMs,
+    normalizeSessionCompactStrategy,
+    normalizeSessionCompactEnabled,
+    normalizeSessionCompactTokenLimit,
+  });
+
+  const session = store.getSession('thread-1');
+  const persisted = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+
+  assert.equal(session.mode, 'dangerous');
+  assert.equal(persisted.threads['thread-1'].mode, 'dangerous');
+});
+
+test('createSessionStore projects current provider state and preserves other provider buckets', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cli-discord-session-store-'));
+  const dataFile = path.join(root, 'sessions.json');
+  const workspaceRoot = path.join(root, 'workspaces');
+  fs.writeFileSync(dataFile, JSON.stringify({
+    threads: {
+      'thread-1': {
+        provider: 'claude',
+        runnerSessionId: 'legacy-claude',
+        codexThreadId: 'legacy-claude',
+        model: 'legacy-model',
+        mode: 'safe',
+        language: 'zh',
+        onboardingEnabled: true,
+        providers: {
+          codex: {
+            runnerSessionId: 'sess-codex',
+            codexThreadId: 'sess-codex',
+            lastInputTokens: 111,
+            model: 'gpt-5.3-codex',
+            effort: 'high',
+            compactStrategy: 'native',
+            compactEnabled: true,
+            compactThresholdTokens: 1000,
+            nativeCompactTokenLimit: 1000,
+            configOverrides: ['personality="concise"'],
+          },
+          claude: {
+            runnerSessionId: 'sess-claude',
+            codexThreadId: 'sess-claude',
+            lastInputTokens: 222,
+            model: 'sonnet',
+            effort: 'medium',
+            compactStrategy: 'hard',
+            compactEnabled: true,
+            compactThresholdTokens: 2000,
+            nativeCompactTokenLimit: null,
+            configOverrides: [],
+          },
+        },
+      },
+    },
+  }, null, 2));
+
+  const store = createSessionStore({
+    dataFile,
+    workspaceRoot,
+    defaults: {
+      provider: 'codex',
+      mode: 'safe',
+      language: 'zh',
+      onboardingEnabled: true,
+    },
+    getSessionId: (session) => String(session?.runnerSessionId || session?.codexThreadId || '').trim() || null,
+    normalizeProvider,
+    normalizeUiLanguage,
+    normalizeSessionSecurityProfile,
+    normalizeSessionTimeoutMs,
+    normalizeSessionCompactStrategy,
+    normalizeSessionCompactEnabled,
+    normalizeSessionCompactTokenLimit,
+  });
+
+  const session = store.getSession('thread-1');
+  session.model = 'claude-opus';
+  store.saveDb();
+  const persisted = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+
+  assert.equal(session.runnerSessionId, 'sess-claude');
+  assert.equal(session.model, 'claude-opus');
+  assert.equal(persisted.threads['thread-1'].providers.claude.model, 'claude-opus');
+  assert.equal(persisted.threads['thread-1'].providers.codex.model, 'gpt-5.3-codex');
+});
+
+test('createSessionStore.saveDb preserves untouched provider buckets before a session is hydrated', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cli-discord-session-store-'));
+  const dataFile = path.join(root, 'sessions.json');
+  const workspaceRoot = path.join(root, 'workspaces');
+  const favoriteDir = path.join(root, 'favorite-workspace');
+  fs.mkdirSync(favoriteDir, { recursive: true });
+  fs.writeFileSync(dataFile, JSON.stringify({
+    threads: {
+      'thread-1': {
+        provider: 'claude',
+        runnerSessionId: 'legacy-claude',
+        codexThreadId: 'legacy-claude',
+        model: 'legacy-model',
+        mode: 'safe',
+        language: 'zh',
+        onboardingEnabled: true,
+        providers: {
+          claude: {
+            runnerSessionId: 'sess-claude',
+            codexThreadId: 'sess-claude',
+            lastInputTokens: 222,
+            model: 'sonnet',
+            effort: 'medium',
+            compactStrategy: 'hard',
+            compactEnabled: true,
+            compactThresholdTokens: 2000,
+            nativeCompactTokenLimit: null,
+            configOverrides: [],
+          },
+        },
+      },
+    },
+  }, null, 2));
+
+  const store = createSessionStore({
+    dataFile,
+    workspaceRoot,
+    defaults: {
+      provider: 'codex',
+      mode: 'safe',
+      language: 'zh',
+      onboardingEnabled: true,
+    },
+    getSessionId: (session) => String(session?.runnerSessionId || session?.codexThreadId || '').trim() || null,
+    normalizeProvider,
+    normalizeUiLanguage,
+    normalizeSessionSecurityProfile,
+    normalizeSessionTimeoutMs,
+    normalizeSessionCompactStrategy,
+    normalizeSessionCompactEnabled,
+    normalizeSessionCompactTokenLimit,
+  });
+
+  store.addFavoriteWorkspace('codex', favoriteDir);
+  const persisted = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+
+  assert.equal(persisted.threads['thread-1'].providers.claude.runnerSessionId, 'sess-claude');
+  assert.equal(persisted.threads['thread-1'].providers.claude.model, 'sonnet');
+});
+
+test('createSessionStore.listSessions hydrates provider-scoped state before saving list mutations', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cli-discord-session-store-'));
+  const dataFile = path.join(root, 'sessions.json');
+  const workspaceRoot = path.join(root, 'workspaces');
+  fs.writeFileSync(dataFile, JSON.stringify({
+    threads: {
+      'thread-1': {
+        provider: 'claude',
+        runnerSessionId: 'legacy-claude',
+        codexThreadId: 'legacy-claude',
+        mode: 'safe',
+        language: 'zh',
+        onboardingEnabled: true,
+        providers: {
+          claude: {
+            runnerSessionId: 'sess-claude',
+            codexThreadId: 'sess-claude',
+            lastInputTokens: 222,
+            model: 'sonnet',
+            effort: 'medium',
+            compactStrategy: 'hard',
+            compactEnabled: true,
+            compactThresholdTokens: 2000,
+            nativeCompactTokenLimit: null,
+            configOverrides: [],
+          },
+        },
+      },
+    },
+  }, null, 2));
+
+  const store = createSessionStore({
+    dataFile,
+    workspaceRoot,
+    defaults: {
+      provider: 'codex',
+      mode: 'safe',
+      language: 'zh',
+      onboardingEnabled: true,
+    },
+    getSessionId: (session) => String(session?.runnerSessionId || session?.codexThreadId || '').trim() || null,
+    normalizeProvider,
+    normalizeUiLanguage,
+    normalizeSessionSecurityProfile,
+    normalizeSessionTimeoutMs,
+    normalizeSessionCompactStrategy,
+    normalizeSessionCompactEnabled,
+    normalizeSessionCompactTokenLimit,
+  });
+
+  const [{ session }] = store.listSessions({ provider: 'claude' });
+  session.runnerSessionId = null;
+  session.codexThreadId = null;
+  store.saveDb();
+  const persisted = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+
+  assert.equal(session.runnerSessionId, null);
+  assert.equal(persisted.threads['thread-1'].providers.claude.runnerSessionId, null);
+});
+
 test('createSessionStore persists provider-scoped workspace favorites', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cli-discord-session-store-'));
   const dataFile = path.join(root, 'sessions.json');

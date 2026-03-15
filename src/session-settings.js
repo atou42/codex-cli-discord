@@ -77,8 +77,8 @@ export function describeCompactStrategy(strategy, language = 'en') {
   switch (strategy) {
     case 'native':
       return language === 'en'
-        ? 'native (Codex CLI auto-compact + continue)'
-        : 'native（Codex CLI 自动压缩并继续当前 session）';
+        ? 'native (provider-managed compaction + continue)'
+        : 'native（由 provider CLI 原生压缩并继续当前 session）';
     case 'off':
       return language === 'en' ? 'off (disabled)' : 'off（关闭）';
     default:
@@ -203,12 +203,13 @@ export function createSessionSettings({
   taskMaxAttempts = 3,
   taskRetryBaseDelayMs = 1000,
   taskRetryMaxDelayMs = 8000,
-  compactStrategy = 'hard',
+  compactStrategy = 'native',
   compactOnThreshold = true,
   maxInputTokensBeforeCompact = 250000,
   modelAutoCompactTokenLimit = maxInputTokensBeforeCompact,
   readCodexDefaults = () => ({ model: '(unknown)', effort: '(unknown)' }),
   normalizeProvider = (provider) => String(provider || '').trim().toLowerCase() || 'codex',
+  getSupportedCompactStrategies = () => ['hard', 'native', 'off'],
 } = {}) {
   function getSessionLanguage(session) {
     if (!session) return defaultUiLanguage;
@@ -249,11 +250,19 @@ export function createSessionSettings({
   }
 
   function resolveCompactStrategySetting(session) {
+    const provider = normalizeProvider(session?.provider);
+    const supportedStrategies = new Set(getSupportedCompactStrategies(provider));
     const sessionStrategy = normalizeSessionCompactStrategy(session?.compactStrategy);
     if (sessionStrategy) {
-      return { strategy: sessionStrategy, source: 'session override' };
+      return {
+        strategy: supportedStrategies.has(sessionStrategy) ? sessionStrategy : 'hard',
+        source: 'session override',
+      };
     }
-    return { strategy: compactStrategy, source: 'env default' };
+    return {
+      strategy: supportedStrategies.has(compactStrategy) ? compactStrategy : 'hard',
+      source: 'env default',
+    };
   }
 
   function resolveCompactEnabledSetting(session) {

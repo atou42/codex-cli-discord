@@ -63,6 +63,7 @@ export function createAppContext({
     getSessionId: identity.getSessionId,
     setSessionId: identity.setSessionId,
     getSessionProvider: identity.getSessionProvider,
+    getSessionLanguage: sessionSettings.getSessionLanguage,
     resolveTimeoutSetting: sessionSettings.resolveTimeoutSetting,
   });
   const workspaceRuntime = createWorkspaceRuntimeFn(workspaceRuntimeOptions);
