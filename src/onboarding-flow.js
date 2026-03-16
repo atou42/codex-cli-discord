@@ -1,35 +1,53 @@
+const PROVIDER_CHOICES = Object.freeze(['codex', 'claude', 'gemini']);
+
+function formatWorkspaceSourceLabel(source, language) {
+  const value = String(source || '').trim().toLowerCase();
+  if (language === 'en') {
+    if (value === 'thread override') return 'this channel override';
+    if (value === 'provider default') return 'provider default';
+    if (value === 'legacy fallback') return 'legacy fallback';
+    if (value === 'unset') return 'unset';
+    return value || 'unknown';
+  }
+
+  if (value === 'thread override') return '当前频道覆盖';
+  if (value === 'provider default') return 'provider 默认';
+  if (value === 'legacy fallback') return 'legacy 回退';
+  if (value === 'unset') return '未设置';
+  return value || '未知';
+}
+
+function formatWorkspacePath(dir, language) {
+  const value = String(dir || '').trim();
+  if (!value) {
+    return language === 'en' ? '(unset)' : '（未设置）';
+  }
+  return `\`${value}\``;
+}
+
 export function createOnboardingFlow({
   onboardingEnabledByDefault = true,
   defaultUiLanguage = 'en',
   onboardingTotalSteps = 4,
-  workspaceRoot = '',
-  discordToken = '',
-  allowedChannelIds = null,
-  allowedUserIds = null,
+  botProvider = null,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   getSession,
   saveDb,
   getSessionProvider,
-  getRuntimeSnapshot,
-  getCliHealth,
-  resolveSecurityContext,
-  getEffectiveSecurityProfile,
-  resolveTimeoutSetting,
   getSessionLanguage,
+  getWorkspaceBinding = () => ({ workspaceDir: null, source: 'unset' }),
+  getProviderDisplayName = (provider) => String(provider || ''),
+  getCliHealth = () => ({ ok: false, bin: 'cli', version: 'unknown' }),
+  resolveSecurityContext = () => ({ mentionOnly: false }),
   normalizeUiLanguage,
   slashRef,
   formatCliHealth,
   formatLanguageLabel,
-  formatSecurityProfileLabel,
-  formatTimeoutLabel,
-  formatQueueLimit,
-  formatSecurityProfileDisplay,
-  formatConfigCommandStatus,
   parseUiLanguageInput,
-  parseSecurityProfileInput,
-  parseTimeoutConfigAction,
+  commandActions = {},
+  openWorkspaceBrowser,
 } = {}) {
   function isOnboardingEnabled(session) {
     if (!session) return onboardingEnabledByDefault;
@@ -52,12 +70,12 @@ export function createOnboardingFlow({
   function formatOnboardingDisabledMessage(language) {
     if (language === 'en') {
       return [
-        'ℹ️ Onboarding is currently disabled in this channel.',
+        'ℹ️ Guided setup is currently disabled in this channel.',
         `Enable with \`${slashRef('onboarding_config')} on\` or \`!onboarding on\`.`,
       ].join('\n');
     }
     return [
-      'ℹ️ 当前频道已关闭 onboarding。',
+      'ℹ️ 当前频道已关闭 guided setup。',
       `可通过 \`${slashRef('onboarding_config')} on\` 或 \`!onboarding on\` 重新开启。`,
     ].join('\n');
   }
@@ -66,14 +84,14 @@ export function createOnboardingFlow({
     const state = enabled ? 'on' : 'off';
     if (language === 'en') {
       if (changed) {
-        return `✅ Onboarding is now ${state}\nUse \`${slashRef('onboarding')}\` or \`!onboarding\` to open guide.`;
+        return `✅ Guided setup is now ${state}\nUse \`${slashRef('onboarding')}\` or \`!onboarding\` to open it.`;
       }
-      return `ℹ️ Onboarding is currently ${state}`;
+      return `ℹ️ Guided setup is currently ${state}`;
     }
     if (changed) {
-      return `✅ onboarding 已设置为 ${state}\n可使用 \`${slashRef('onboarding')}\` 或 \`!onboarding\` 打开引导。`;
+      return `✅ guided setup 已设置为 ${state}\n可使用 \`${slashRef('onboarding')}\` 或 \`!onboarding\` 打开。`;
     }
-    return `ℹ️ 当前 onboarding = ${state}`;
+    return `ℹ️ 当前 guided setup = ${state}`;
   }
 
   function formatOnboardingConfigHelp(language) {
@@ -90,44 +108,47 @@ export function createOnboardingFlow({
   }
 
   function getOnboardingSnapshot(key, session = null, channel = null, language = defaultUiLanguage) {
-    const provider = getSessionProvider(session);
-    const runtime = getRuntimeSnapshot(key);
-    const cliHealth = getCliHealth(provider);
-    const security = resolveSecurityContext(channel, session);
-    const profileSetting = getEffectiveSecurityProfile(session);
-    const timeoutSetting = resolveTimeoutSetting(session);
-    const currentLanguage = getSessionLanguage(session);
-    const hasToken = Boolean(discordToken);
-    const hasWorkspace = Boolean(String(workspaceRoot || '').trim());
     const lang = normalizeUiLanguage(language);
-    const mentionHint = security.mentionOnly
-      ? (lang === 'en'
-        ? 'Normal chat messages require @Bot mention (or use `!` commands).'
-        : '本频道普通消息需 @Bot（或直接用 `!` 命令）。')
-      : (lang === 'en'
-        ? 'Normal messages in this channel can be sent directly to the bot.'
-        : '本频道普通消息可直接发送给 Bot。');
+    const provider = getSessionProvider(session);
+    const currentLanguage = getSessionLanguage(session);
+    const binding = getWorkspaceBinding(session, key) || {};
+    const cliHealth = getCliHealth(provider);
+    const security = resolveSecurityContext(channel, session) || {};
     const firstPromptHint = security.mentionOnly
       ? (lang === 'en'
-        ? 'Send `@Bot check current directory and create a TODO`'
-        : '发送 `@Bot 帮我检查当前目录并创建一个 TODO`')
+        ? 'Send `@Bot summarize this repo and propose the next task`'
+        : '发送 `@Bot 帮我总结这个仓库，并给出下一步建议`')
       : (lang === 'en'
-        ? 'Send `check current directory and create a TODO`'
-        : '发送 `帮我检查当前目录并创建一个 TODO`');
+        ? 'Send `summarize this repo and propose the next task`'
+        : '发送 `帮我总结这个仓库，并给出下一步建议`');
+
     return {
-      provider,
       language: lang,
-      runtime,
-      cliHealth,
-      security,
-      profileSetting,
-      timeoutSetting,
+      provider,
       currentLanguage,
-      hasToken,
-      hasWorkspace,
-      mentionHint,
+      binding,
+      cliHealth,
+      providerLocked: Boolean(botProvider),
+      hasWorkspaceBrowser: typeof openWorkspaceBrowser === 'function',
       firstPromptHint,
     };
+  }
+
+  function formatProviderSummary(provider, language) {
+    const label = getProviderDisplayName(provider);
+    if (language === 'en') {
+      return `\`${provider}\` (${label})`;
+    }
+    return `\`${provider}\`（${label}）`;
+  }
+
+  function formatWorkspaceSummary(binding, language) {
+    const pathLabel = formatWorkspacePath(binding?.workspaceDir, language);
+    const sourceLabel = formatWorkspaceSourceLabel(binding?.source, language);
+    if (language === 'en') {
+      return `${pathLabel} (${sourceLabel})`;
+    }
+    return `${pathLabel}（${sourceLabel}）`;
   }
 
   function formatOnboardingReport(key, session = null, channel = null, language = defaultUiLanguage) {
@@ -135,75 +156,37 @@ export function createOnboardingFlow({
     const snapshot = getOnboardingSnapshot(key, session, channel, lang);
     if (lang === 'en') {
       return [
-        '🧭 **Onboarding (Text)**',
-        `• For interactive steps, use \`${slashRef('onboarding')}\` (buttons + direct config on each step)`,
+        '🧭 **Quick Start**',
+        `• Interactive guide: \`${slashRef('onboarding')}\``,
+        `• Language: ${formatLanguageLabel(snapshot.currentLanguage)}`,
+        `• Provider: ${formatProviderSummary(snapshot.provider, lang)}`,
+        `• Workspace: ${formatWorkspaceSummary(snapshot.binding, lang)}`,
         '',
-        '**1) Preflight check**',
-        `• DISCORD_TOKEN: ${snapshot.hasToken ? '✅ loaded' : '❌ missing'}`,
-        `• WORKSPACE_ROOT: ${snapshot.hasWorkspace ? `✅ \`${workspaceRoot}\`` : '❌ missing'}`,
-        `• cli: ${formatCliHealth(snapshot.cliHealth)}`,
-        `• ui language: ${formatLanguageLabel(snapshot.currentLanguage)}`,
-        `• profile setting: ${formatSecurityProfileLabel(snapshot.profileSetting.profile)} (${snapshot.profileSetting.source})`,
-        `• timeout setting: ${formatTimeoutLabel(snapshot.timeoutSetting.timeoutMs)} (${snapshot.timeoutSetting.source})`,
+        '1. Choose your UI language.',
+        snapshot.providerLocked
+          ? `2. Provider is fixed by this bot: ${formatProviderSummary(snapshot.provider, lang)}`
+          : '2. Choose the provider for this channel.',
+        '3. Pick the workspace for this channel.',
+        `4. Send the first task: ${snapshot.firstPromptHint}`,
         '',
-        '**2) Access scope & security policy (effective now)**',
-        `• ALLOWED_CHANNEL_IDS: ${allowedChannelIds ? `${allowedChannelIds.size} configured` : '(all channels)'}`,
-        `• ALLOWED_USER_IDS: ${allowedUserIds ? `${allowedUserIds.size} configured` : '(all users)'}`,
-        `• security profile: ${formatSecurityProfileDisplay(snapshot.security)}`,
-        `• mention only: ${snapshot.security.mentionOnly ? 'on' : 'off'} (${snapshot.mentionHint})`,
-        `• queue limit: ${formatQueueLimit(snapshot.security.maxQueuePerChannel)}`,
-        `• queued prompts now: ${snapshot.runtime.queued}`,
-        `• !config: ${formatConfigCommandStatus()}`,
-        '',
-        '**3) First run flow**',
-        `1. \`${slashRef('doctor')}\` or \`!doctor\` to verify health checks.`,
-        `2. \`${slashRef('status')}\` or \`!status\` to verify mode/model/workspace.`,
-        `3. \`${slashRef('setdir')} <path>\` or \`!setdir <path>\` to bind target project.`,
-        `4. Send your first task: ${snapshot.firstPromptHint}`,
-        `5. If backlog appears, check \`${slashRef('queue')}\` / \`!queue\`; use \`${slashRef('cancel')}\` / \`!cancel\` / \`!c\` when needed.`,
-        '',
-        '**4) Recommended defaults**',
-        '• Start with 1 channel + 1 admin account, then gradually open access.',
-        '• Keep `ENABLE_CONFIG_CMD=false`; if enabled, allowlist only required keys.',
-        '• Keep `safe` as default; switch to `dangerous` only in trusted environments.',
-        '',
-        `Quick re-check: \`${slashRef('doctor')}\``,
+        `Need a quick check? Use \`${slashRef('status')}\` or \`!status\`. If something looks wrong, run \`${slashRef('doctor')}\`.`,
       ].join('\n');
     }
     return [
-      '🧭 **Onboarding（文本版）**',
-      `• 交互分步版请使用 \`${slashRef('onboarding')}\`（每步可直接配置 + 上一步/下一步/完成）`,
+      '🧭 **首跑引导**',
+      `• 交互式引导：\`${slashRef('onboarding')}\``,
+      `• 当前语言：${formatLanguageLabel(snapshot.currentLanguage)}`,
+      `• 当前 provider：${formatProviderSummary(snapshot.provider, lang)}`,
+      `• 当前 workspace：${formatWorkspaceSummary(snapshot.binding, lang)}`,
       '',
-      '**1) 安装自检（先看当前是否可跑）**',
-      `• DISCORD_TOKEN: ${snapshot.hasToken ? '✅ loaded' : '❌ missing'}`,
-      `• WORKSPACE_ROOT: ${snapshot.hasWorkspace ? `✅ \`${workspaceRoot}\`` : '❌ missing'}`,
-      `• cli: ${formatCliHealth(snapshot.cliHealth)}`,
-      `• ui language: ${formatLanguageLabel(snapshot.currentLanguage)}`,
-      `• profile setting: ${formatSecurityProfileLabel(snapshot.profileSetting.profile)}（${snapshot.profileSetting.source}）`,
-      `• timeout setting: ${formatTimeoutLabel(snapshot.timeoutSetting.timeoutMs)}（${snapshot.timeoutSetting.source}）`,
-      '',
-      '**2) 访问范围与安全策略（当前生效）**',
-      `• ALLOWED_CHANNEL_IDS: ${allowedChannelIds ? `${allowedChannelIds.size} configured` : '(all channels)'}`,
-      `• ALLOWED_USER_IDS: ${allowedUserIds ? `${allowedUserIds.size} configured` : '(all users)'}`,
-      `• security profile: ${formatSecurityProfileDisplay(snapshot.security)}`,
-      `• mention only: ${snapshot.security.mentionOnly ? 'on' : 'off'}（${snapshot.mentionHint}）`,
-      `• queue limit: ${formatQueueLimit(snapshot.security.maxQueuePerChannel)}`,
-      `• queued prompts now: ${snapshot.runtime.queued}`,
-      `• !config: ${formatConfigCommandStatus()}`,
-      '',
-      '**3) 首跑流程（按顺序）**',
-      `1. \`${slashRef('doctor')}\` 或 \`!doctor\`，确认健康检查通过。`,
-      `2. \`${slashRef('status')}\` 或 \`!status\`，确认 mode/model/workspace。`,
-      `3. \`${slashRef('setdir')} <path>\` 或 \`!setdir <path>\`，绑定目标项目目录。`,
+      '1. 先选消息语言。',
+      snapshot.providerLocked
+        ? `2. 当前 bot 已锁定 provider：${formatProviderSummary(snapshot.provider, lang)}`
+        : '2. 选择这个频道要用的 provider。',
+      '3. 选择这个频道要工作的目录。',
       `4. 发送第一条任务：${snapshot.firstPromptHint}`,
-      `5. 如有积压，用 \`${slashRef('queue')}\` / \`!queue\` 查看；必要时 \`${slashRef('cancel')}\` / \`!cancel\` / \`!c\`。`,
       '',
-      '**4) 新用户默认建议**',
-      '• 先限制到 1 个频道 + 1 个管理员账号，再逐步放开。',
-      '• 保持 `ENABLE_CONFIG_CMD=false`；确实要开时仅白名单必要 key。',
-      '• 默认用 `safe`；仅在可信环境切到 `dangerous`。',
-      '',
-      `需要快速复查时可直接执行：\`${slashRef('doctor')}\``,
+      `想快速确认当前设置，可用 \`${slashRef('status')}\` 或 \`!status\`。如果感觉环境有问题，再执行 \`${slashRef('doctor')}\`。`,
     ].join('\n');
   }
 
@@ -232,7 +215,9 @@ export function createOnboardingFlow({
     const parts = text.split(':');
     if (parts.length < 4 || parts[0] !== 'onb') return null;
     const [, action, rawStep, userId, ...rest] = parts;
-    if (!['goto', 'refresh', 'done', 'set_lang', 'set_profile', 'set_timeout'].includes(action)) return null;
+    if (!['goto', 'refresh', 'done', 'set_lang', 'set_provider', 'workspace_default', 'workspace_browse'].includes(action)) {
+      return null;
+    }
     if (!/^[0-9]{5,32}$/.test(String(userId || ''))) return null;
     return {
       action,
@@ -242,9 +227,10 @@ export function createOnboardingFlow({
     };
   }
 
-  function buildOnboardingConfigRow(step, userId, session = null, language = defaultUiLanguage) {
+  function buildOnboardingConfigRow(step, key, userId, session = null, language = defaultUiLanguage) {
     const lang = normalizeUiLanguage(language);
     const current = normalizeOnboardingStep(step);
+
     if (current === 1) {
       const activeLanguage = getSessionLanguage(session);
       return new ActionRowBuilder().addComponents(
@@ -260,36 +246,36 @@ export function createOnboardingFlow({
     }
 
     if (current === 2) {
-      const activeProfile = getEffectiveSecurityProfile(session).profile;
-      const options = ['auto', 'solo', 'team', 'public'];
+      if (botProvider) return null;
+      const activeProvider = getSessionProvider(session);
       return new ActionRowBuilder().addComponents(
-        ...options.map((profile) => new ButtonBuilder()
-          .setCustomId(buildOnboardingButtonId('set_profile', current, userId, profile))
-          .setLabel(profile)
-          .setStyle(activeProfile === profile ? ButtonStyle.Primary : ButtonStyle.Secondary)),
+        ...PROVIDER_CHOICES.map((provider) => new ButtonBuilder()
+          .setCustomId(buildOnboardingButtonId('set_provider', current, userId, provider))
+          .setLabel(provider)
+          .setStyle(activeProvider === provider ? ButtonStyle.Primary : ButtonStyle.Secondary)),
       );
     }
 
     if (current === 3) {
-      const activeTimeoutMs = resolveTimeoutSetting(session).timeoutMs;
-      const presets = [
-        { value: 0, label: lang === 'en' ? 'off' : '关闭' },
-        { value: 30000, label: '30s' },
-        { value: 60000, label: '60s' },
-        { value: 120000, label: '120s' },
-      ];
+      const binding = getWorkspaceBinding(session, key) || {};
+      const hasThreadOverride = binding.source === 'thread override';
       return new ActionRowBuilder().addComponents(
-        ...presets.map((preset) => new ButtonBuilder()
-          .setCustomId(buildOnboardingButtonId('set_timeout', current, userId, String(preset.value)))
-          .setLabel(preset.label)
-          .setStyle(activeTimeoutMs === preset.value ? ButtonStyle.Primary : ButtonStyle.Secondary)),
+        new ButtonBuilder()
+          .setCustomId(buildOnboardingButtonId('workspace_default', current, userId))
+          .setLabel(lang === 'en' ? 'Use Default' : '使用默认')
+          .setStyle(hasThreadOverride ? ButtonStyle.Secondary : ButtonStyle.Primary)
+          .setDisabled(!hasThreadOverride),
+        new ButtonBuilder()
+          .setCustomId(buildOnboardingButtonId('workspace_browse', current, userId))
+          .setLabel(lang === 'en' ? 'Browse...' : '浏览...')
+          .setStyle(ButtonStyle.Primary),
       );
     }
 
     return null;
   }
 
-  function buildOnboardingActionRows(step, userId, session = null, language = defaultUiLanguage) {
+  function buildOnboardingActionRows(step, key, userId, session = null, language = defaultUiLanguage) {
     const lang = normalizeUiLanguage(language);
     const current = normalizeOnboardingStep(step);
     const previous = normalizeOnboardingStep(current - 1);
@@ -316,7 +302,8 @@ export function createOnboardingFlow({
           .setStyle(ButtonStyle.Success),
       ),
     ];
-    const configRow = buildOnboardingConfigRow(current, userId, session, lang);
+
+    const configRow = buildOnboardingConfigRow(current, key, userId, session, lang);
     if (configRow) rows.push(configRow);
     return rows;
   }
@@ -325,101 +312,105 @@ export function createOnboardingFlow({
     const lang = normalizeUiLanguage(language);
     const current = normalizeOnboardingStep(step);
     const snapshot = getOnboardingSnapshot(key, session, channel, lang);
+    const workspaceSummary = formatWorkspaceSummary(snapshot.binding, lang);
+
     if (lang === 'en') {
       switch (current) {
         case 1:
           return [
-            '🧭 **Onboarding 1/4: Preflight + Language**',
-            `• DISCORD_TOKEN: ${snapshot.hasToken ? '✅ loaded' : '❌ missing'}`,
-            `• WORKSPACE_ROOT: ${snapshot.hasWorkspace ? `✅ \`${workspaceRoot}\`` : '❌ missing'}`,
-            `• cli: ${formatCliHealth(snapshot.cliHealth)}`,
-            `• ui language (current): ${formatLanguageLabel(snapshot.currentLanguage)}`,
+            '🧭 **Guided Setup 1/4: Language**',
+            `• Current language: ${formatLanguageLabel(snapshot.currentLanguage)}`,
             '',
-            'Choose language with buttons, then click "Next".',
+            'Choose the language for bot messages in this channel, then click "Next".',
           ].join('\n');
         case 2:
           return [
-            '🧭 **Onboarding 2/4: Scope & Security Profile**',
-            `• ALLOWED_CHANNEL_IDS: ${allowedChannelIds ? `${allowedChannelIds.size} configured` : '(all channels)'}`,
-            `• ALLOWED_USER_IDS: ${allowedUserIds ? `${allowedUserIds.size} configured` : '(all users)'}`,
-            `• security profile: ${formatSecurityProfileDisplay(snapshot.security)}`,
-            `• profile setting: ${formatSecurityProfileLabel(snapshot.profileSetting.profile)} (${snapshot.profileSetting.source})`,
-            `• mention only: ${snapshot.security.mentionOnly ? 'on' : 'off'} (${snapshot.mentionHint})`,
-            `• queue limit: ${formatQueueLimit(snapshot.security.maxQueuePerChannel)}`,
-            `• queued prompts now: ${snapshot.runtime.queued}`,
+            '🧭 **Guided Setup 2/4: Provider**',
+            `• Current provider: ${formatProviderSummary(snapshot.provider, lang)}`,
+            `• CLI health: ${formatCliHealth(snapshot.cliHealth)}`,
+            snapshot.providerLocked
+              ? '• This bot is locked to one provider, so switching is disabled here.'
+              : '• Pick the provider you want to use in this channel.',
             '',
-            'Choose `auto/solo/team/public` with buttons, then click "Next".',
+            snapshot.providerLocked
+              ? 'Click "Next" to continue.'
+              : 'Choose a provider with buttons, then click "Next".',
           ].join('\n');
         case 3:
           return [
-            '🧭 **Onboarding 3/4: Timeout**',
-            `• runner timeout (current): ${formatTimeoutLabel(snapshot.timeoutSetting.timeoutMs)} (${snapshot.timeoutSetting.source})`,
-            '• quick presets: off / 30s / 60s / 120s',
-            `• custom value: \`${slashRef('timeout')} <ms|off|status>\` or \`!timeout <ms|off|status>\``,
+            '🧭 **Guided Setup 3/4: Workspace**',
+            `• Current workspace: ${workspaceSummary}`,
+            snapshot.binding.source === 'thread override'
+              ? '• This channel is using its own workspace override.'
+              : '• This channel is following the default workspace for the active provider.',
+            snapshot.hasWorkspaceBrowser
+              ? '• "Browse..." opens a separate workspace picker for this channel.'
+              : `• Use \`${slashRef('setdir')} path:browse\` or \`!setdir browse\` if you want to pick a folder interactively.`,
             '',
-            'Choose a timeout preset with buttons, then click "Next".',
+            'Use "Use Default" to clear the channel override, or "Browse..." to choose a folder.',
           ].join('\n');
         case 4:
         default:
           return [
-            '🧭 **Onboarding 4/4: First Run Checklist**',
-            `1. \`${slashRef('doctor')}\` or \`!doctor\` to verify health checks.`,
-            `2. \`${slashRef('status')}\` or \`!status\` to verify mode/model/workspace/profile/timeout.`,
-            `3. \`${slashRef('setdir')} <path>\` or \`!setdir <path>\` to bind project path.`,
-            `4. Send the first task: ${snapshot.firstPromptHint}`,
-            `5. Use \`${slashRef('queue')}\` / \`!queue\` for backlog, \`${slashRef('cancel')}\` / \`!cancel\` / \`!c\` to stop.`,
+            '🧭 **Guided Setup 4/4: Ready**',
+            `• Language: ${formatLanguageLabel(snapshot.currentLanguage)}`,
+            `• Provider: ${formatProviderSummary(snapshot.provider, lang)}`,
+            `• Workspace: ${workspaceSummary}`,
             '',
-            `Current settings: language=${formatLanguageLabel(snapshot.currentLanguage)}, profile=${formatSecurityProfileLabel(snapshot.profileSetting.profile)}, timeout=${formatTimeoutLabel(snapshot.timeoutSetting.timeoutMs)}`,
+            `Send the first task: ${snapshot.firstPromptHint}`,
+            `Need a quick check? Use \`${slashRef('status')}\` or \`!status\`. If something looks wrong, run \`${slashRef('doctor')}\`.`,
             '',
-            'Click "Done" when finished.',
+            'Click "Done" when you are ready.',
           ].join('\n');
       }
     }
+
     switch (current) {
       case 1:
         return [
-          '🧭 **Onboarding 1/4：安装自检 + 语言设置**',
-          `• DISCORD_TOKEN: ${snapshot.hasToken ? '✅ loaded' : '❌ missing'}`,
-          `• WORKSPACE_ROOT: ${snapshot.hasWorkspace ? `✅ \`${workspaceRoot}\`` : '❌ missing'}`,
-          `• cli: ${formatCliHealth(snapshot.cliHealth)}`,
-          `• ui language（当前）：${formatLanguageLabel(snapshot.currentLanguage)}`,
+          '🧭 **首跑引导 1/4：语言**',
+          `• 当前语言：${formatLanguageLabel(snapshot.currentLanguage)}`,
           '',
-          '请用按钮选择语言，然后点「下一步」。',
+          '请选择这个频道里 Bot 消息提示的语言，然后点「下一步」。',
         ].join('\n');
       case 2:
         return [
-          '🧭 **Onboarding 2/4：访问范围与安全策略**',
-          `• ALLOWED_CHANNEL_IDS: ${allowedChannelIds ? `${allowedChannelIds.size} configured` : '(all channels)'}`,
-          `• ALLOWED_USER_IDS: ${allowedUserIds ? `${allowedUserIds.size} configured` : '(all users)'}`,
-          `• security profile: ${formatSecurityProfileDisplay(snapshot.security)}`,
-          `• profile setting: ${formatSecurityProfileLabel(snapshot.profileSetting.profile)}（${snapshot.profileSetting.source}）`,
-          `• mention only: ${snapshot.security.mentionOnly ? 'on' : 'off'}（${snapshot.mentionHint}）`,
-          `• queue limit: ${formatQueueLimit(snapshot.security.maxQueuePerChannel)}`,
-          `• queued prompts now: ${snapshot.runtime.queued}`,
+          '🧭 **首跑引导 2/4：Provider**',
+          `• 当前 provider：${formatProviderSummary(snapshot.provider, lang)}`,
+          `• CLI 健康状态：${formatCliHealth(snapshot.cliHealth)}`,
+          snapshot.providerLocked
+            ? '• 当前 bot 已锁定单一 provider，这里不能切换。'
+            : '• 请选择这个频道接下来要用的 provider。',
           '',
-          '请用按钮选择 `auto/solo/team/public`，然后点「下一步」。',
+          snapshot.providerLocked
+            ? '直接点「下一步」继续。'
+            : '请选择 provider，然后点「下一步」。',
         ].join('\n');
       case 3:
         return [
-          '🧭 **Onboarding 3/4：超时设置**',
-          `• runner timeout（当前）：${formatTimeoutLabel(snapshot.timeoutSetting.timeoutMs)}（${snapshot.timeoutSetting.source}）`,
-          '• 快捷预设：off / 30s / 60s / 120s',
-          `• 自定义值：\`${slashRef('timeout')} <毫秒|off|status>\` 或 \`!timeout <毫秒|off|status>\``,
+          '🧭 **首跑引导 3/4：Workspace**',
+          `• 当前 workspace：${workspaceSummary}`,
+          snapshot.binding.source === 'thread override'
+            ? '• 当前频道正在使用自己的 workspace 覆盖。'
+            : '• 当前频道正在跟随 active provider 的默认 workspace。',
+          snapshot.hasWorkspaceBrowser
+            ? '• 「浏览...」会打开一个独立的路径选择器。'
+            : `• 如果要交互式选目录，可用 \`${slashRef('setdir')} path:browse\` 或 \`!setdir browse\`。`,
           '',
-          '请用按钮选择 timeout 预设，然后点「下一步」。',
+          '可用「使用默认」清除当前频道覆盖，或用「浏览...」选择目录。',
         ].join('\n');
       case 4:
       default:
         return [
-          '🧭 **Onboarding 4/4：首跑流程（5 步）**',
-          `1. \`${slashRef('doctor')}\` 或 \`!doctor\`，确认健康检查通过。`,
-          `2. \`${slashRef('status')}\` 或 \`!status\`，确认 mode/model/workspace/profile/timeout。`,
-          `3. \`${slashRef('setdir')} <path>\` 或 \`!setdir <path>\`，绑定目标项目目录。`,
-          `4. 发送第一条任务：${snapshot.firstPromptHint}`,
-          `5. 如有积压，用 \`${slashRef('queue')}\` / \`!queue\` 查看；必要时 \`${slashRef('cancel')}\` / \`!cancel\` / \`!c\`。`,
+          '🧭 **首跑引导 4/4：Ready**',
+          `• 语言：${formatLanguageLabel(snapshot.currentLanguage)}`,
+          `• Provider：${formatProviderSummary(snapshot.provider, lang)}`,
+          `• Workspace：${workspaceSummary}`,
           '',
-          `当前设置：language=${formatLanguageLabel(snapshot.currentLanguage)}，profile=${formatSecurityProfileLabel(snapshot.profileSetting.profile)}，timeout=${formatTimeoutLabel(snapshot.timeoutSetting.timeoutMs)}`,
-          '完成后点击「完成」关闭引导面板。',
+          `发送第一条任务：${snapshot.firstPromptHint}`,
+          `想快速确认当前设置，可用 \`${slashRef('status')}\` 或 \`!status\`。如果感觉环境有问题，再执行 \`${slashRef('doctor')}\`。`,
+          '',
+          '准备好了就点「完成」。',
         ].join('\n');
     }
   }
@@ -427,33 +418,31 @@ export function createOnboardingFlow({
   function formatOnboardingDoneReport(key, session = null, channel = null, language = defaultUiLanguage) {
     const lang = normalizeUiLanguage(language);
     const snapshot = getOnboardingSnapshot(key, session, channel, lang);
+    const workspaceSummary = formatWorkspaceSummary(snapshot.binding, lang);
     if (lang === 'en') {
       return [
-        '✅ **Onboarding Completed**',
-        `• active security profile: ${formatSecurityProfileDisplay(snapshot.security)}`,
-        `• mention only: ${snapshot.security.mentionOnly ? 'on' : 'off'}`,
-        `• queue limit: ${formatQueueLimit(snapshot.security.maxQueuePerChannel)}`,
-        `• ui language: ${formatLanguageLabel(snapshot.currentLanguage)}`,
-        `• runner timeout: ${formatTimeoutLabel(snapshot.timeoutSetting.timeoutMs)} (${snapshot.timeoutSetting.source})`,
+        '✅ **Guided Setup Complete**',
+        `• Language: ${formatLanguageLabel(snapshot.currentLanguage)}`,
+        `• Provider: ${formatProviderSummary(snapshot.provider, lang)}`,
+        `• Workspace: ${workspaceSummary}`,
         '',
-        `You can use: \`${slashRef('doctor')}\`, \`${slashRef('status')}\`, \`${slashRef('queue')}\``,
+        `Next: ${snapshot.firstPromptHint}`,
       ].join('\n');
     }
     return [
-      '✅ **Onboarding 已完成**',
-      `• 当前安全策略：${formatSecurityProfileDisplay(snapshot.security)}`,
-      `• mention only: ${snapshot.security.mentionOnly ? 'on' : 'off'}`,
-      `• queue limit: ${formatQueueLimit(snapshot.security.maxQueuePerChannel)}`,
-      `• ui language: ${formatLanguageLabel(snapshot.currentLanguage)}`,
-      `• runner timeout: ${formatTimeoutLabel(snapshot.timeoutSetting.timeoutMs)}（${snapshot.timeoutSetting.source}）`,
+      '✅ **首跑引导已完成**',
+      `• 语言：${formatLanguageLabel(snapshot.currentLanguage)}`,
+      `• Provider：${formatProviderSummary(snapshot.provider, lang)}`,
+      `• Workspace：${workspaceSummary}`,
       '',
-      `后续可直接使用：\`${slashRef('doctor')}\`、\`${slashRef('status')}\`、\`${slashRef('queue')}\``,
+      `下一步：${snapshot.firstPromptHint}`,
     ].join('\n');
   }
 
   async function handleOnboardingButtonInteraction(interaction) {
     const parsed = parseOnboardingButtonId(interaction.customId);
     if (!parsed) return;
+
     const key = interaction.channelId;
     const session = key ? getSession(key) : null;
     const language = getSessionLanguage(session);
@@ -461,7 +450,7 @@ export function createOnboardingFlow({
     if (parsed.userId !== interaction.user.id) {
       await interaction.reply({
         content: language === 'en'
-          ? `This onboarding panel is only controllable by its creator. Run \`${slashRef('onboarding')}\` to create your own panel.`
+          ? `This guided setup panel is only controllable by its creator. Run \`${slashRef('onboarding')}\` to create your own panel.`
           : `这个引导面板只对发起者可操作。请执行 \`${slashRef('onboarding')}\` 创建你自己的面板。`,
         flags: 64,
       });
@@ -484,25 +473,56 @@ export function createOnboardingFlow({
     if (parsed.action === 'set_lang') {
       const selectedLanguage = parseUiLanguageInput(parsed.value);
       if (selectedLanguage) {
-        session.language = selectedLanguage;
+        if (typeof commandActions.setLanguage === 'function') {
+          commandActions.setLanguage(session, selectedLanguage);
+        } else {
+          session.language = selectedLanguage;
+          saveDb();
+        }
+      }
+    }
+
+    if (parsed.action === 'set_provider' && !botProvider) {
+      const provider = PROVIDER_CHOICES.includes(parsed.value) ? parsed.value : null;
+      if (provider) {
+        if (typeof commandActions.setProvider === 'function') {
+          commandActions.setProvider(session, provider);
+        } else {
+          session.provider = provider;
+          saveDb();
+        }
+      }
+    }
+
+    if (parsed.action === 'workspace_default') {
+      if (typeof commandActions.clearWorkspaceDir === 'function') {
+        commandActions.clearWorkspaceDir(session, key);
+      } else {
+        session.workspaceDir = null;
         saveDb();
       }
     }
 
-    if (parsed.action === 'set_profile') {
-      const profile = parseSecurityProfileInput(parsed.value);
-      if (profile) {
-        session.securityProfile = profile;
-        saveDb();
+    if (parsed.action === 'workspace_browse') {
+      const currentLanguage = getSessionLanguage(session);
+      if (typeof openWorkspaceBrowser === 'function') {
+        await interaction.reply(openWorkspaceBrowser({
+          key,
+          session,
+          userId: interaction.user.id,
+          mode: 'thread',
+          flags: 64,
+        }));
+        return;
       }
-    }
 
-    if (parsed.action === 'set_timeout') {
-      const timeoutAction = parseTimeoutConfigAction(parsed.value);
-      if (timeoutAction?.type === 'set') {
-        session.timeoutMs = timeoutAction.timeoutMs;
-        saveDb();
-      }
+      await interaction.reply({
+        content: currentLanguage === 'en'
+          ? `Use \`${slashRef('setdir')} path:browse\` or \`!setdir browse\` to open the workspace picker.`
+          : `请使用 \`${slashRef('setdir')} path:browse\` 或 \`!setdir browse\` 打开路径选择器。`,
+        flags: 64,
+      });
+      return;
     }
 
     const currentLanguage = getSessionLanguage(session);
@@ -517,7 +537,7 @@ export function createOnboardingFlow({
 
     await interaction.update({
       content: formatOnboardingStepReport(parsed.step, key, session, interaction.channel, currentLanguage),
-      components: buildOnboardingActionRows(parsed.step, interaction.user.id, session, currentLanguage),
+      components: buildOnboardingActionRows(parsed.step, key, interaction.user.id, session, currentLanguage),
     });
   }
 

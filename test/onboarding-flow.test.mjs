@@ -46,51 +46,52 @@ const ButtonStyle = {
   Success: 'success',
 };
 
-function createFlow({ session, saveDb } = {}) {
+function createFlow({
+  session,
+  botProvider = null,
+  saveDb = () => {},
+  commandActions = {},
+  openWorkspaceBrowser,
+  getWorkspaceBinding,
+} = {}) {
   return createOnboardingFlow({
     onboardingEnabledByDefault: true,
     defaultUiLanguage: 'zh',
     onboardingTotalSteps: 4,
-    workspaceRoot: '/tmp/workspace',
-    discordToken: 'discord-token',
-    allowedChannelIds: new Set(['channel-1']),
-    allowedUserIds: new Set(['user-1']),
+    botProvider,
     ActionRowBuilder: FakeActionRowBuilder,
     ButtonBuilder: FakeButtonBuilder,
     ButtonStyle,
     getSession: () => session,
     saveDb,
-    getSessionProvider: () => 'codex',
-    getRuntimeSnapshot: () => ({ queued: 0 }),
-    getCliHealth: () => ({ ok: true, version: '1.2.3', bin: 'codex' }),
-    resolveSecurityContext: () => ({ profile: 'solo', mentionOnly: false, maxQueuePerChannel: 0 }),
-    getEffectiveSecurityProfile: (currentSession) => ({ profile: currentSession?.securityProfile || 'auto', source: 'session override' }),
-    resolveTimeoutSetting: (currentSession) => ({ timeoutMs: currentSession?.timeoutMs ?? 60000, source: 'session override' }),
+    getSessionProvider: (currentSession) => currentSession?.provider || 'codex',
     getSessionLanguage: (currentSession) => currentSession?.language || 'zh',
+    getWorkspaceBinding: getWorkspaceBinding || ((currentSession) => ({
+      workspaceDir: currentSession?.workspaceDir || '/tmp/provider-default',
+      source: currentSession?.workspaceSource || (currentSession?.workspaceDir ? 'thread override' : 'provider default'),
+    })),
+    getProviderDisplayName: (provider) => ({
+      codex: 'Codex CLI',
+      claude: 'Claude Code',
+      gemini: 'Gemini CLI',
+    }[provider] || provider),
+    getCliHealth: (provider) => ({ ok: true, version: '1.2.3', bin: provider }),
+    resolveSecurityContext: () => ({ mentionOnly: false }),
     normalizeUiLanguage: (value) => String(value || '').trim().toLowerCase() === 'en' ? 'en' : 'zh',
     slashRef: (base) => `/bot-${base}`,
     formatCliHealth: (health) => `${health.bin} ${health.version}`,
     formatLanguageLabel: (language) => language === 'en' ? 'English' : '中文',
-    formatSecurityProfileLabel: (profile) => profile,
-    formatTimeoutLabel: (timeoutMs) => timeoutMs > 0 ? `${timeoutMs}ms` : 'off',
-    formatQueueLimit: (limit) => limit > 0 ? String(limit) : 'unlimited',
-    formatSecurityProfileDisplay: (security) => `${security.profile}/${security.mentionOnly ? 'mention' : 'direct'}`,
-    formatConfigCommandStatus: () => 'disabled',
     parseUiLanguageInput: (value) => ['zh', 'en'].includes(value) ? value : null,
-    parseSecurityProfileInput: (value) => ['auto', 'solo', 'team', 'public'].includes(value) ? value : null,
-    parseTimeoutConfigAction: (value) => {
-      const timeoutMs = Number(value);
-      if (!Number.isFinite(timeoutMs)) return null;
-      return { type: 'set', timeoutMs };
-    },
+    commandActions,
+    openWorkspaceBrowser,
   });
 }
 
-test('createOnboardingFlow builds onboarding action rows for language step', () => {
-  const session = { language: 'zh', onboardingEnabled: true };
-  const flow = createFlow({ session, saveDb: () => {} });
+test('createOnboardingFlow builds language step action rows', () => {
+  const session = { language: 'zh', provider: 'codex', onboardingEnabled: true };
+  const flow = createFlow({ session });
 
-  const rows = flow.buildOnboardingActionRows(1, '12345', session, 'zh');
+  const rows = flow.buildOnboardingActionRows(1, 'thread-1', '12345', session, 'zh');
 
   assert.equal(rows.length, 2);
   assert.equal(rows[0].components.length, 4);
@@ -102,14 +103,18 @@ test('createOnboardingFlow builds onboarding action rows for language step', () 
 });
 
 test('createOnboardingFlow updates session language through button interaction', async () => {
-  const session = { language: 'en', onboardingEnabled: true, securityProfile: 'auto', timeoutMs: 60000 };
+  const session = { language: 'en', provider: 'codex', onboardingEnabled: true };
   let saveCount = 0;
   const updates = [];
   const replies = [];
   const flow = createFlow({
     session,
-    saveDb: () => {
-      saveCount += 1;
+    commandActions: {
+      setLanguage(currentSession, language) {
+        currentSession.language = language;
+        saveCount += 1;
+        return { language };
+      },
     },
   });
 
@@ -130,6 +135,138 @@ test('createOnboardingFlow updates session language through button interaction',
   assert.equal(saveCount, 1);
   assert.equal(replies.length, 0);
   assert.equal(updates.length, 1);
-  assert.match(updates[0].content, /Onboarding 1\/4：安装自检 \+ 语言设置/);
+  assert.match(updates[0].content, /首跑引导 1\/4：语言/);
   assert.equal(updates[0].components.length, 2);
+});
+
+test('createOnboardingFlow builds provider buttons in shared mode', () => {
+  const session = { language: 'zh', provider: 'claude', onboardingEnabled: true };
+  const flow = createFlow({ session });
+
+  const rows = flow.buildOnboardingActionRows(2, 'thread-1', '12345', session, 'zh');
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows[1].components.map((component) => component.data.label),
+    ['codex', 'claude', 'gemini'],
+  );
+  assert.equal(rows[1].components[1].data.style, ButtonStyle.Primary);
+});
+
+test('createOnboardingFlow hides provider buttons when bot provider is locked', () => {
+  const session = { language: 'zh', provider: 'gemini', onboardingEnabled: true };
+  const flow = createFlow({ session, botProvider: 'gemini' });
+
+  const rows = flow.buildOnboardingActionRows(2, 'thread-1', '12345', session, 'zh');
+  const report = flow.formatOnboardingStepReport(2, 'thread-1', session, { id: 'thread-1' }, 'zh');
+
+  assert.equal(rows.length, 1);
+  assert.match(report, /已锁定单一 provider/);
+});
+
+test('createOnboardingFlow updates provider through button interaction', async () => {
+  const session = { language: 'zh', provider: 'codex', onboardingEnabled: true };
+  const updates = [];
+  const flow = createFlow({
+    session,
+    commandActions: {
+      setProvider(currentSession, provider) {
+        currentSession.provider = provider;
+        return { previous: 'codex', provider };
+      },
+    },
+  });
+
+  await flow.handleOnboardingButtonInteraction({
+    customId: 'onb:set_provider:2:12345:gemini',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    channel: { id: 'thread-1' },
+    async update(payload) {
+      updates.push(payload);
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+  });
+
+  assert.equal(session.provider, 'gemini');
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].content, /Gemini CLI/);
+});
+
+test('createOnboardingFlow opens workspace browser in a separate reply', async () => {
+  const session = { language: 'zh', provider: 'codex', onboardingEnabled: true };
+  const updates = [];
+  const replies = [];
+  const flow = createFlow({
+    session,
+    openWorkspaceBrowser: ({ key, userId, mode, flags }) => ({
+      content: `browse:${mode}:${key}:${userId}`,
+      components: [],
+      flags,
+    }),
+  });
+
+  await flow.handleOnboardingButtonInteraction({
+    customId: 'onb:workspace_browse:3:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    channel: { id: 'thread-1' },
+    async update(payload) {
+      updates.push(payload);
+    },
+    async reply(payload) {
+      replies.push(payload);
+    },
+  });
+
+  assert.equal(updates.length, 0);
+  assert.deepEqual(replies, [{
+    content: 'browse:thread:thread-1:12345',
+    components: [],
+    flags: 64,
+  }]);
+});
+
+test('createOnboardingFlow clears thread workspace override through default button', async () => {
+  const session = {
+    language: 'zh',
+    provider: 'codex',
+    onboardingEnabled: true,
+    workspaceDir: '/repo/override',
+    workspaceSource: 'thread override',
+  };
+  const updates = [];
+  let clearCalls = 0;
+  const flow = createFlow({
+    session,
+    commandActions: {
+      clearWorkspaceDir(currentSession) {
+        clearCalls += 1;
+        currentSession.workspaceDir = null;
+        currentSession.workspaceSource = 'provider default';
+        return { workspaceDir: '/tmp/provider-default', source: 'provider default' };
+      },
+    },
+  });
+
+  await flow.handleOnboardingButtonInteraction({
+    customId: 'onb:workspace_default:3:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    channel: { id: 'thread-1' },
+    async update(payload) {
+      updates.push(payload);
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+  });
+
+  assert.equal(clearCalls, 1);
+  assert.equal(session.workspaceDir, null);
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].content, /provider 默认 workspace|provider 默认/);
+  assert.equal(updates[0].components[1].components[0].data.disabled, true);
 });
