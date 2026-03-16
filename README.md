@@ -32,7 +32,8 @@
   - `/cancel` / `/abort` / `!cancel` / `!c` / `!abort` 可中断当前运行并清空队列
   - 长任务实时进度（阶段/耗时/最新步骤），并支持 `/progress` / `!progress`
   - `/doctor` / `!doctor` 可做运行与安全配置体检
-  - `/onboarding` 可用按钮分步引导并可直接配置关键项，`!onboarding` 提供文本版兜底
+  - `/onboarding` 面向普通用户首跑：四步完成语言、provider、workspace、ready，workspace 步可直接打开路径选择器；`!onboarding` 提供文本版兜底
+  - slash 回复默认不再附带通用快捷按钮；需要时直接用 `/status`、`/queue`、`/progress`、`/cancel`
   - 支持按线程配置 onboarding 开关（on/off/status）与消息提示语言（zh/en，默认 zh）
   - 支持按线程覆盖 security profile（`auto|solo|team|public`）
   - 支持按线程覆盖 runner timeout（`毫秒|off|status`）
@@ -65,7 +66,9 @@ Git hooks 说明：
 - clone 后（或重新 clone 后）执行一次 `npm run setup-hooks`
 - pre-commit 原子性检查基于 Node，可在 macOS/Linux/Windows 上工作（不依赖 bash）
 
-然后在你的 Discord 服务器邀请 Bot，并使用以下 slash 命令。下面示例使用的是 Codex / shared 模式默认前缀 `cx_`；独立 Claude bot 默认前缀是 `cc_`，独立 Gemini bot 默认前缀是 `gm_`，并且都可通过 `SLASH_PREFIX`、`CODEX__SLASH_PREFIX`、`CLAUDE__SLASH_PREFIX`、`GEMINI__SLASH_PREFIX` 覆盖：
+然后在你的 Discord 服务器邀请 Bot。普通用户首跑建议先执行 `/cx_onboarding`，依次选语言、provider、workspace，再发第一条任务。
+
+下面示例使用的是 Codex / shared 模式默认前缀 `cx_`；独立 Claude bot 默认前缀是 `cc_`，独立 Gemini bot 默认前缀是 `gm_`，并且都可通过 `SLASH_PREFIX`、`CODEX__SLASH_PREFIX`、`CLAUDE__SLASH_PREFIX`、`GEMINI__SLASH_PREFIX` 覆盖：
 
 - `/cx_status` - 查看当前线程配置
 - `/cx_setdir <path|default|status>` - 设置或清除当前线程的 workspace
@@ -81,7 +84,7 @@ Git hooks 说明：
 - `/cx_sessions` - 列出 provider 原生运行时里的最近会话
 - `/cx_queue` - 查看当前频道运行中/排队任务数量
 - `/cx_doctor` - 查看 Bot 运行/安全体检信息
-- `/cx_onboarding` - 交互式新用户引导（分步按钮，ephemeral）
+- `/cx_onboarding` - 普通用户首跑引导（language/provider/workspace/ready，ephemeral）
 - `/cx_onboarding_config <on|off|status>` - 配置当前频道 onboarding 是否可用
 - `/cx_language <中文|English>` - 设置当前频道消息提示语言
 - `/cx_profile <auto|solo|team|public|status>` - 设置或查看当前频道 security profile 覆盖

@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-03-16
+
+### Changed
+- Reworked `/onboarding` into an ordinary-user first-run guide focused on language, provider, workspace, and the first task instead of admin-oriented security and timeout setup.
+- The onboarding workspace step can now open the existing workspace browser directly, and the text fallback now mirrors the same user-facing quick-start flow.
+- Slash command replies no longer attach the generic shortcut button bar; users rely on explicit commands while buttons stay reserved for finite-choice flows such as guided setup.
+
 ## [0.6.1] - 2026-03-16
 
 ### Added

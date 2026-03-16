@@ -32,7 +32,8 @@ A standalone Discord bot that lets you direct **Codex CLI**, **Claude Code**, an
   - `/cancel` / `/abort` / `!cancel` / `!c` / `!abort` to interrupt the current run and clear queued prompts
   - long-run live progress updates (phase/elapsed/latest step), plus `/progress` / `!progress`
   - `/doctor` / `!doctor` for runtime + security diagnostics
-  - `/onboarding` interactive onboarding wizard (buttons + direct config), `!onboarding` text fallback
+  - `/onboarding` ordinary-user first-run guide: language, provider, workspace, ready; the workspace step can open the browser directly, with `!onboarding` as a text fallback
+  - slash replies stay text-first by default; use `/status`, `/queue`, `/progress`, or `/cancel` explicitly when you need them
   - per-thread onboarding switch (`on/off/status`) and message language (`zh/en`, default `zh`)
   - per-thread security profile override (`auto|solo|team|public`)
   - per-thread runner timeout override (`ms|off|status`)
@@ -65,7 +66,9 @@ Git hooks note:
 - Run `npm run setup-hooks` once after clone (or after re-clone).
 - The pre-commit atomic check is Node-based and works on macOS/Linux/Windows (no bash required).
 
-Then in your Discord server, invite the bot, and use these slash commands. Examples below use the default Codex/shared prefix `cx_`; a dedicated Claude bot defaults to `cc_`, a dedicated Gemini bot defaults to `gm_`, and all can be overridden with `SLASH_PREFIX`, `CODEX__SLASH_PREFIX`, `CLAUDE__SLASH_PREFIX`, or `GEMINI__SLASH_PREFIX`:
+Then in your Discord server, invite the bot. For a normal first run, start with `/cx_onboarding`, choose language/provider/workspace, then send the first task.
+
+Examples below use the default Codex/shared prefix `cx_`; a dedicated Claude bot defaults to `cc_`, a dedicated Gemini bot defaults to `gm_`, and all can be overridden with `SLASH_PREFIX`, `CODEX__SLASH_PREFIX`, `CLAUDE__SLASH_PREFIX`, or `GEMINI__SLASH_PREFIX`:
 
 - `/cx_status` — show current thread config
 - `/cx_setdir <path|default|status>` — set or clear workspace for current thread
@@ -81,7 +84,7 @@ Then in your Discord server, invite the bot, and use these slash commands. Examp
 - `/cx_sessions` — list recent provider-native sessions from the runtime store
 - `/cx_queue` — show running/queued task count in current channel
 - `/cx_doctor` — show bot runtime/security diagnostics
-- `/cx_onboarding` — interactive onboarding (step-by-step buttons, ephemeral)
+- `/cx_onboarding` — ordinary-user first-run guide (language/provider/workspace/ready, ephemeral)
 - `/cx_onboarding_config <on|off|status>` — configure onboarding availability in current channel
 - `/cx_language <中文|English>` — set bot message hint language in current channel
 - `/cx_profile <auto|solo|team|public|status>` — set or view current channel security profile override
