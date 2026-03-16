@@ -4,6 +4,7 @@ export function createChannelQueue({
   getChannelState,
   getSession,
   resolveSecurityContext,
+  slashRef = (name) => `/${name}`,
   safeReply,
   safeError,
   getCurrentUserId,
@@ -30,7 +31,7 @@ export function createChannelQueue({
     if (maxQueue > 0 && state.queue.length >= maxQueue) {
       await safeReply(
         message,
-        `🚧 当前频道队列已满（上限 ${maxQueue}）。请稍后重试，或用 \`!queue\` / \`!cancel\` / \`!c\` 处理积压任务。`,
+        `🚧 当前频道队列已满（上限 ${maxQueue}）。请稍后重试，或用 \`${slashRef('status')}\` 查看状态，必要时用 \`!c\` 清空当前任务与积压。`,
       );
       return { ok: false, enqueued: false, reason: 'queue_full', maxQueue };
     }
@@ -46,7 +47,7 @@ export function createChannelQueue({
     if (queuedAhead > 0) {
       await safeReply(
         message,
-        `⏳ 已加入队列，前面还有 ${queuedAhead} 条。可用 \`!queue\` 查看状态，\`!cancel\` / \`!c\` 中断当前任务。`,
+        `⏳ 已加入队列，前面还有 ${queuedAhead} 条。可用 \`${slashRef('status')}\` 查看状态，必要时用 \`!c\` 中断当前任务。`,
       );
     }
 

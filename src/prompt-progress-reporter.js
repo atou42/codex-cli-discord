@@ -210,8 +210,8 @@ export function createPromptProgressReporterFactory({
       const phase = formatRuntimePhaseLabel(channelState?.activeRun?.phase || 'starting', lang);
       const hint = status === 'running'
         ? (lang === 'en'
-          ? `Use \`!cancel\` / \`!c\` or \`${slashRef('cancel')}\` to interrupt, and \`!progress\` for details.`
-          : `可用 \`!cancel\` / \`!c\` 或 \`${slashRef('cancel')}\` 中断，\`!progress\` 查看详情。`)
+          ? `Use \`!c\` to interrupt, and \`${slashRef('status')}\` for details.`
+          : `可用 \`!c\` 中断，\`${slashRef('status')}\` 查看状态。`)
         : (lang === 'en'
           ? 'You can continue with a new message, or check remaining backlog with `!queue`.'
           : '可继续发送新消息，或用 `!queue` 查看是否还有排队任务。');

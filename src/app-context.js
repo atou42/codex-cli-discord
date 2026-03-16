@@ -134,6 +134,7 @@ export function createAppContext({
       ...channelQueueOptions,
       getSession: sessionStore.getSession,
       resolveSecurityContext: securityPolicy.resolveSecurityContext,
+      slashRef: promptSlashRef,
     },
     factories: promptRuntimeFactories,
   });

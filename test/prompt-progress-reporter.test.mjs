@@ -124,8 +124,9 @@ test('createPromptProgressReporterFactory seeds initial step and updates final p
   await harness.reporter.start();
   assert.match(harness.sent[0].content, /Waiting for workspace lock: \/repo\/demo/);
   assert.deepEqual(harness.sent[0].components, []);
-  assert.match(harness.sent[0].content, /!cancel/);
   assert.match(harness.sent[0].content, /!c/);
+  assert.match(harness.sent[0].content, /\/bot-status/);
+  assert.doesNotMatch(harness.sent[0].content, /!cancel/);
   assert.equal(harness.channelState.activeRun.lastProgressText, 'Waiting for workspace lock: /repo/demo');
   assert.equal(harness.channelState.activeRun.progressMessageId, 'progress-1');
 

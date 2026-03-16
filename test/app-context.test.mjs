@@ -228,6 +228,7 @@ test('createAppContext wires factories and cross-links composition dependencies'
   assert.equal(calls.promptRuntime.promptOrchestratorOptions.resolveTaskRetrySetting, sessionSettings.resolveTaskRetrySetting);
   assert.equal(calls.promptRuntime.channelQueueOptions.resolveSecurityContext, securityPolicy.resolveSecurityContext);
   assert.equal(calls.promptRuntime.channelQueueOptions.getCurrentUserId, undefined);
+  assert.equal(calls.promptRuntime.channelQueueOptions.slashRef('status'), '/bot_status');
   assert.match(
     calls.promptRuntime.promptOrchestratorOptions.formatWorkspaceBusyReport(
       { language: 'zh' },

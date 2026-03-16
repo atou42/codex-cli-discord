@@ -335,14 +335,14 @@ export function createReportFormatters({
           'ℹ️ No running task in this channel.',
           `• queued prompts: ${runtime.queued}`,
           `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-          `• hint: After sending a task, use \`!progress\` / \`${slashRef('progress')}\` for live updates.`,
+          `• hint: After sending a task, use \`${slashRef('status')}\` to check status.`,
         ].join('\n');
       }
       return [
         'ℹ️ 当前没有运行中的任务。',
         `• 排队任务: ${runtime.queued}`,
         `• 队列上限: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-        `• 提示: 发送新任务后可用 \`!progress\` / \`${slashRef('progress')}\` 查看实时进度。`,
+        `• 提示: 发送新任务后可用 \`${slashRef('status')}\` 查看状态。`,
       ].join('\n');
     }
     const processLines = renderProcessContentLines(runtime.recentActivities, lang, progressProcessLines);
@@ -366,7 +366,7 @@ export function createReportFormatters({
         runtime.progressMessageId ? `• progress message id: \`${runtime.progressMessageId}\`` : null,
         `• queued prompts: ${runtime.queued}`,
         `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-        `• hint: Use \`!cancel\` / \`!c\` or \`${slashRef('cancel')}\` to interrupt current task and clear queue.`,
+        `• hint: Use \`!c\` to interrupt, and \`${slashRef('status')}\` to check status.`,
       ].filter(Boolean).join('\n');
     }
     return [
@@ -382,7 +382,7 @@ export function createReportFormatters({
       runtime.progressMessageId ? `• 进度消息 ID: \`${runtime.progressMessageId}\`` : null,
       `• 排队任务: ${runtime.queued}`,
       `• 队列上限: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-      `• 提示: 可用 \`!cancel\` / \`!c\` 或 \`${slashRef('cancel')}\` 中断当前任务并清空队列。`,
+      `• 提示: 可用 \`!c\` 中断，\`${slashRef('status')}\` 查看状态。`,
     ].filter(Boolean).join('\n');
   }
 

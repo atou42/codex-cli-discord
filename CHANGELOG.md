@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-03-16
+
+### Changed
+- Simplified queue and progress card hints so user-facing messaging now points to `!c` and `/status` only, while keeping legacy cancel aliases available for compatibility.
+
 ## [0.8.0] - 2026-03-16
 
 ### Added

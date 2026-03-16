@@ -150,7 +150,35 @@ test('createReportFormatters.formatProgressReport returns localized idle hint', 
 
   assert.match(report, /当前没有运行中的任务/);
   assert.match(report, /队列上限: 5/);
-  assert.match(report, /`\/bot-progress`/);
+  assert.match(report, /`\/bot-status`/);
+  assert.doesNotMatch(report, /`\/bot-progress`/);
+});
+
+test('createReportFormatters.formatProgressReport keeps running hints minimal', () => {
+  const formatters = createFormatters({
+    getRuntimeSnapshot: () => ({
+      running: true,
+      queued: 1,
+      progressPlan: null,
+      completedSteps: [],
+      recentActivities: [],
+      progressText: 'building',
+      progressAgoMs: 1_234,
+      messageId: 'msg-1',
+      progressMessageId: 'progress-1',
+      progressEvents: 4,
+      activeSinceMs: 3_000,
+      pid: 1234,
+      phase: 'exec',
+    }),
+  });
+
+  const report = formatters.formatProgressReport('thread-1', { language: 'zh' }, { id: 'channel-1' });
+
+  assert.match(report, /`!c`/);
+  assert.match(report, /`\/bot-status`/);
+  assert.doesNotMatch(report, /!cancel/);
+  assert.doesNotMatch(report, /\/bot-cancel/);
 });
 
 test('createReportFormatters.formatDoctorReport includes allowlist and workspace lock diagnostics', () => {
