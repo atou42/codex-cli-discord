@@ -131,7 +131,6 @@ export function createPromptProgressReporterFactory({
   now = () => Date.now(),
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
-  buildRunningComponents = () => [],
 } = {}) {
   const {
     summarizeCodexEvent = () => '',
@@ -211,8 +210,8 @@ export function createPromptProgressReporterFactory({
       const phase = formatRuntimePhaseLabel(channelState?.activeRun?.phase || 'starting', lang);
       const hint = status === 'running'
         ? (lang === 'en'
-          ? `Use \`!abort\` / \`${slashRef('cancel')}\` to interrupt, and \`!progress\` for details.`
-          : `可用 \`!abort\` / \`${slashRef('cancel')}\` 中断，\`!progress\` 查看详情。`)
+          ? `Use \`!cancel\` / \`!c\` or \`${slashRef('cancel')}\` to interrupt, and \`!progress\` for details.`
+          : `可用 \`!cancel\` / \`!c\` 或 \`${slashRef('cancel')}\` 中断，\`!progress\` 查看详情。`)
         : (lang === 'en'
           ? 'You can continue with a new message, or check remaining backlog with `!queue`.'
           : '可继续发送新消息，或用 `!queue` 查看是否还有排队任务。');
@@ -238,21 +237,7 @@ export function createPromptProgressReporterFactory({
       return joinLinesWithinLimit(lines, progressMessageMaxChars, truncate);
     };
 
-    const buildPayload = (body, status = 'running') => {
-      if (status === 'running') {
-        const components = buildRunningComponents({
-          message,
-          channelState,
-          language: lang,
-        });
-        if (Array.isArray(components) && components.length) {
-          return {
-            content: body,
-            components,
-          };
-        }
-      }
-
+    const buildPayload = (body) => {
       return {
         content: body,
         components: [],
@@ -269,7 +254,7 @@ export function createPromptProgressReporterFactory({
       const currentTime = now();
       if (!force && currentTime - lastEmitAt < progressEventFlushMs) return;
       const body = render('running');
-      const payload = buildPayload(body, 'running');
+      const payload = buildPayload(body);
       if (!force && body === lastRendered) return;
 
       isEmitting = true;

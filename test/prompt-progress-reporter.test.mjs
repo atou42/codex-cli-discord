@@ -96,11 +96,6 @@ function createHarness(overrides = {}) {
     clearIntervalFn: (handle) => {
       cleared.push(handle);
     },
-    buildRunningComponents: ({ message: progressMessage }) => (
-      progressMessage?.author?.id
-        ? [{ type: 'row', customId: `cmd:cancel:${progressMessage.author.id}` }]
-        : []
-    ),
     ...overrides.factoryOptions,
   });
 
@@ -128,7 +123,9 @@ test('createPromptProgressReporterFactory seeds initial step and updates final p
 
   await harness.reporter.start();
   assert.match(harness.sent[0].content, /Waiting for workspace lock: \/repo\/demo/);
-  assert.deepEqual(harness.sent[0].components, [{ type: 'row', customId: 'cmd:cancel:12345' }]);
+  assert.deepEqual(harness.sent[0].components, []);
+  assert.match(harness.sent[0].content, /!cancel/);
+  assert.match(harness.sent[0].content, /!c/);
   assert.equal(harness.channelState.activeRun.lastProgressText, 'Waiting for workspace lock: /repo/demo');
   assert.equal(harness.channelState.activeRun.progressMessageId, 'progress-1');
 
@@ -136,7 +133,7 @@ test('createPromptProgressReporterFactory seeds initial step and updates final p
   harness.advance(50);
   harness.reporter.setLatestStep('Workspace lock acquired: /repo/demo');
   assert.match(harness.edits[0].content, /Workspace lock acquired: \/repo\/demo/);
-  assert.deepEqual(harness.edits[0].components, [{ type: 'row', customId: 'cmd:cancel:12345' }]);
+  assert.deepEqual(harness.edits[0].components, []);
 
   await harness.reporter.finish({ ok: true });
   assert.match(harness.edits[harness.edits.length - 1].content, /✅ \*\*Task Completed\*\*/);
