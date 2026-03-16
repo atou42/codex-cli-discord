@@ -152,6 +152,10 @@ export function buildSlashCommandEntries({ botProvider = null } = {}) {
       description: '查看当前 thread 的 CLI 配置',
     },
     {
+      name: 'settings',
+      description: '打开当前频道的交互式设置面板',
+    },
+    {
       name: 'new',
       description: '切换到新会话，并保留当前频道配置',
     },

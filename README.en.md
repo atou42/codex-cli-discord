@@ -71,6 +71,7 @@ Then in your Discord server, invite the bot. For a normal first run, start with 
 Examples below use the default Codex/shared prefix `cx_`; a dedicated Claude bot defaults to `cc_`, a dedicated Gemini bot defaults to `gm_`, and all can be overridden with `SLASH_PREFIX`, `CODEX__SLASH_PREFIX`, `CLAUDE__SLASH_PREFIX`, or `GEMINI__SLASH_PREFIX`:
 
 - `/cx_status` — show current thread config
+- `/cx_settings` — open the interactive channel settings panel for provider, model, fast mode, effort, compact, mode, language, and workspace
 - `/cx_setdir <path|default|status>` — set or clear workspace for current thread
 - `/cx_setdefaultdir <path|clear|status>` — set provider default workspace
 - `/cx_model <name|default>` — set model override

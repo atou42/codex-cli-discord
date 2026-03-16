@@ -71,6 +71,7 @@ Git hooks 说明：
 下面示例使用的是 Codex / shared 模式默认前缀 `cx_`；独立 Claude bot 默认前缀是 `cc_`，独立 Gemini bot 默认前缀是 `gm_`，并且都可通过 `SLASH_PREFIX`、`CODEX__SLASH_PREFIX`、`CLAUDE__SLASH_PREFIX`、`GEMINI__SLASH_PREFIX` 覆盖：
 
 - `/cx_status` - 查看当前线程配置
+- `/cx_settings` - 打开当前频道的交互式设置面板；统一调整 provider、model、fast、effort、compact、mode、language、workspace
 - `/cx_setdir <path|default|status>` - 设置或清除当前线程的 workspace
 - `/cx_setdefaultdir <path|clear|status>` - 设置当前 provider 的默认 workspace
 - `/cx_model <name|default>` - 设置模型覆盖

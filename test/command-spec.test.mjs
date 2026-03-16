@@ -30,9 +30,11 @@ test('buildSlashCommandEntries includes aliases and provider toggle only in shar
   const cancelEntry = sharedEntries.find((entry) => entry.name === 'cancel');
   const sessionsEntry = sharedEntries.find((entry) => entry.name === 'sessions');
   const resumeEntry = sharedEntries.find((entry) => entry.name === 'resume');
+  const settingsEntry = sharedEntries.find((entry) => entry.name === 'settings');
   const fastEntry = sharedEntries.find((entry) => entry.name === 'fast');
 
   assert.equal(Array.isArray(newEntry.aliases), false);
+  assert.ok(settingsEntry);
   assert.deepEqual(cancelEntry.aliases, ['abort']);
   assert.deepEqual(sessionsEntry.aliases, ['rollout_sessions', 'project_sessions', 'chat_sessions']);
   assert.deepEqual(resumeEntry.aliases, ['rollout_resume', 'project_resume', 'chat_resume']);

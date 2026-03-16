@@ -20,8 +20,12 @@ export function createDiscordEntryHandlers({
   parseCommandActionButtonId,
   isWorkspaceBrowserComponentId,
   isOnboardingButtonId,
+  isSettingsPanelComponentId,
+  isSettingsPanelModalId,
   handleWorkspaceBrowserInteraction,
   handleOnboardingButtonInteraction,
+  handleSettingsPanelInteraction,
+  handleSettingsPanelModalSubmit,
   routeSlashCommand,
   normalizeSlashCommandName,
 } = {}) {
@@ -160,7 +164,8 @@ export function createDiscordEntryHandlers({
       const isWorkspaceBrowser = isWorkspaceBrowserComponentId(interaction.customId);
       const commandButton = interaction.isButton() ? parseCommandActionButtonId(interaction.customId) : null;
       const isOnboarding = interaction.isButton() && isOnboardingButtonId(interaction.customId);
-      if (!isWorkspaceBrowser && !isOnboarding && !commandButton) return;
+      const isSettingsPanel = isSettingsPanelComponentId(interaction.customId);
+      if (!isWorkspaceBrowser && !isOnboarding && !commandButton && !isSettingsPanel) return;
       logger.log(`[interaction] kind=${interaction.isButton() ? 'button' : 'select'} id=${interaction.customId} user=${interaction.user?.tag || interaction.user?.id || 'unknown'} channel=${interaction.channelId || 'unknown'}`);
       try {
         if (!isAllowedUser(interaction.user.id)) {
@@ -190,9 +195,34 @@ export function createDiscordEntryHandlers({
           await handleWorkspaceBrowserInteraction(interaction);
           return;
         }
+        if (isSettingsPanel) {
+          await handleSettingsPanelInteraction(interaction);
+          return;
+        }
         await handleOnboardingButtonInteraction(interaction);
       } catch (err) {
         logger.error(`interactionCreate component handler error (${describeInteraction(interaction)}):`, err);
+        await safeInteractionFailureReply(interaction, err);
+      }
+      return;
+    }
+
+    if (typeof interaction.isModalSubmit === 'function' && interaction.isModalSubmit()) {
+      const isSettingsModal = isSettingsPanelModalId(interaction.customId);
+      if (!isSettingsModal) return;
+      logger.log(`[interaction] kind=modal id=${interaction.customId} user=${interaction.user?.tag || interaction.user?.id || 'unknown'} channel=${interaction.channelId || 'unknown'}`);
+      try {
+        if (!isAllowedUser(interaction.user.id)) {
+          await sendInteractionResponse(interaction, { content: '⛔ 没有权限。', flags: 64 });
+          return;
+        }
+        if (!(await isAllowedInteractionChannel(interaction))) {
+          await sendInteractionResponse(interaction, { content: '⛔ 当前频道未开放。', flags: 64 });
+          return;
+        }
+        await handleSettingsPanelModalSubmit(interaction);
+      } catch (err) {
+        logger.error(`interactionCreate modal handler error (${describeInteraction(interaction)}):`, err);
         await safeInteractionFailureReply(interaction, err);
       }
       return;

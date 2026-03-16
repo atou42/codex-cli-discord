@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-16
+
+### Added
+- Added `/settings`, an interactive per-channel settings panel that groups provider, model, fast mode, reasoning effort, compact strategy, execution mode, language, and workspace controls behind one slash entry point.
+
+### Changed
+- Reframed Fast mode and model tuning around the new settings panel so users can choose explicit options such as "follow global" or open a model modal instead of guessing command-only defaults.
+
 ## [0.7.0] - 2026-03-16
 
 ### Added

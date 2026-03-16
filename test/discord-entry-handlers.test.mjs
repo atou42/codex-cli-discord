@@ -21,6 +21,8 @@ function createHarness(overrides = {}) {
     retries: [],
     workspaceBrowser: 0,
     onboarding: 0,
+    settingsPanel: 0,
+    settingsModal: 0,
   };
 
   const handlers = createDiscordEntryHandlers({
@@ -65,11 +67,19 @@ function createHarness(overrides = {}) {
     parseCommandActionButtonId: () => null,
     isWorkspaceBrowserComponentId: () => false,
     isOnboardingButtonId: () => false,
+    isSettingsPanelComponentId: () => false,
+    isSettingsPanelModalId: () => false,
     handleWorkspaceBrowserInteraction: async () => {
       calls.workspaceBrowser += 1;
     },
     handleOnboardingButtonInteraction: async () => {
       calls.onboarding += 1;
+    },
+    handleSettingsPanelInteraction: async () => {
+      calls.settingsPanel += 1;
+    },
+    handleSettingsPanelModalSubmit: async () => {
+      calls.settingsModal += 1;
     },
     routeSlashCommand: async (payload) => {
       calls.routeSlashCommand.push(payload);
@@ -117,6 +127,46 @@ test('handleInteractionCreate rejects command button clicks from other users', a
   await handlers.handleInteractionCreate(interaction);
 
   assert.deepEqual(replies, [{ content: '⛔ 这组快捷按钮属于发起命令的用户。', flags: 64 }]);
+});
+
+test('handleInteractionCreate routes settings panel component interactions', async () => {
+  const { handlers, calls } = createHarness({
+    isSettingsPanelComponentId: () => true,
+  });
+  const interaction = {
+    customId: 'stg:nav:overview:_:12345',
+    user: { id: '12345' },
+    isButton: () => true,
+    isStringSelectMenu: () => false,
+    isModalSubmit: () => false,
+    isChatInputCommand: () => false,
+    async reply() {},
+  };
+
+  await handlers.handleInteractionCreate(interaction);
+
+  assert.equal(calls.settingsPanel, 1);
+  assert.equal(calls.workspaceBrowser, 0);
+  assert.equal(calls.onboarding, 0);
+});
+
+test('handleInteractionCreate routes settings panel modal submits', async () => {
+  const { handlers, calls } = createHarness({
+    isSettingsPanelModalId: () => true,
+  });
+  const interaction = {
+    customId: 'stgm:model:12345',
+    user: { id: '12345' },
+    isButton: () => false,
+    isStringSelectMenu: () => false,
+    isModalSubmit: () => true,
+    isChatInputCommand: () => false,
+    async reply() {},
+  };
+
+  await handlers.handleInteractionCreate(interaction);
+
+  assert.equal(calls.settingsModal, 1);
 });
 
 test('handleInteractionCreate defers chat commands and reports unknown commands via editReply', async () => {

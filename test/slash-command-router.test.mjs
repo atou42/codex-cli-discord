@@ -27,6 +27,7 @@ function createRouterState(overrides = {}) {
   const cancelCalls = [];
   const retryCalls = [];
   const browseCalls = [];
+  const settingsCalls = [];
   let fastModeSetting = { enabled: false, supported: true, source: 'config.toml' };
   let retryOutcome = { ok: true, enqueued: true, queuedAhead: 0 };
 
@@ -124,6 +125,11 @@ function createRouterState(overrides = {}) {
       browseCalls.push(payload);
       return payload;
     },
+    openSettingsPanel: ({ key, userId, activeSection, flags }) => {
+      const payload = { content: `settings:${key}:${userId}:${activeSection}`, components: [], flags };
+      settingsCalls.push(payload);
+      return payload;
+    },
     resolvePath: (value) => value,
     safeError: (err) => String(err?.message || err),
     ...overrides,
@@ -140,6 +146,7 @@ function createRouterState(overrides = {}) {
     setRetryOutcome: (value) => {
       retryOutcome = value;
     },
+    getSettingsCalls: () => [...settingsCalls],
     getFastModeSetting: () => fastModeSetting,
   };
 }
@@ -203,6 +210,30 @@ test('createSlashCommandRouter opens workspace browser for setdir browse', async
   assert.deepEqual(state.replies, [{
     content: 'browse:thread:channel-1:user-1',
     components: [],
+  }]);
+});
+
+test('createSlashCommandRouter opens the interactive settings panel', async () => {
+  const state = createRouterState();
+
+  const handled = await state.router({
+    interaction: createInteraction('cx_settings'),
+    commandName: 'settings',
+    respond: async (payload) => {
+      state.replies.push(payload);
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(state.getSettingsCalls(), [{
+    content: 'settings:channel-1:user-1:overview',
+    components: [],
+    flags: 64,
+  }]);
+  assert.deepEqual(state.replies, [{
+    content: 'settings:channel-1:user-1:overview',
+    components: [],
+    flags: 64,
   }]);
 });
 

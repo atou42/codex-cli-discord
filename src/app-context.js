@@ -140,6 +140,7 @@ export function createAppContext({
 
   const {
     onboardingOptions = {},
+    settingsPanelOptions = {},
     reportOptions = {},
     workspaceBrowserOptions = {},
     slashRouterOptions = {},
@@ -158,6 +159,17 @@ export function createAppContext({
       getWorkspaceBinding: sessionStore.getWorkspaceBinding,
       resolveSecurityContext: securityPolicy.resolveSecurityContext,
       getSessionLanguage: sessionSettings.getSessionLanguage,
+    },
+    settingsPanelOptions: {
+      ...settingsPanelOptions,
+      commandActions,
+      getSession: sessionStore.getSession,
+      getSessionLanguage: sessionSettings.getSessionLanguage,
+      getSessionProvider: identity.getSessionProvider,
+      getWorkspaceBinding: sessionStore.getWorkspaceBinding,
+      getProviderDefaults: sessionSettings.getProviderDefaults,
+      resolveFastModeSetting: sessionSettings.resolveFastModeSetting,
+      resolveCompactStrategySetting: sessionSettings.resolveCompactStrategySetting,
     },
     reportOptions: {
       ...reportOptions,
@@ -246,8 +258,12 @@ export function createAppContext({
     enqueuePrompt: promptRuntime.enqueuePrompt,
     isWorkspaceBrowserComponentId: commandSurface.isWorkspaceBrowserComponentId,
     isOnboardingButtonId: commandSurface.isOnboardingButtonId,
+    isSettingsPanelComponentId: commandSurface.isSettingsPanelComponentId,
+    isSettingsPanelModalId: commandSurface.isSettingsPanelModalId,
     handleWorkspaceBrowserInteraction: commandSurface.handleWorkspaceBrowserInteraction,
     handleOnboardingButtonInteraction: commandSurface.handleOnboardingButtonInteraction,
+    handleSettingsPanelInteraction: commandSurface.handleSettingsPanelInteraction,
+    handleSettingsPanelModalSubmit: commandSurface.handleSettingsPanelModalSubmit,
     routeSlashCommand: commandSurface.routeSlashCommand,
     normalizeSlashCommandName: commandSurface.normalizeSlashCommandName,
   });

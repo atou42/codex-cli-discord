@@ -98,6 +98,7 @@ export function createSlashCommandRouter({
   cancelChannelWork,
   retryLastPrompt,
   openWorkspaceBrowser,
+  openSettingsPanel,
   resolvePath,
   safeError,
 } = {}) {
@@ -108,6 +109,24 @@ export function createSlashCommandRouter({
       content: formatStatusReport(key, session, interaction.channel),
       flags: 64,
     });
+  });
+
+  registerSlashHandlers(handlers, ['settings'], async ({ interaction, key, session, respond }) => {
+    if (typeof openSettingsPanel !== 'function') {
+      await respond({
+        content: '❌ 当前环境未启用 settings 面板。',
+        flags: 64,
+      });
+      return;
+    }
+
+    await respond(openSettingsPanel({
+      key,
+      session,
+      userId: interaction.user.id,
+      activeSection: 'overview',
+      flags: 64,
+    }));
   });
 
   registerSlashHandlers(handlers, ['new'], async ({ interaction, key, session, respond }) => {

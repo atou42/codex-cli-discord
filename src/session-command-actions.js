@@ -86,6 +86,12 @@ export function createSessionCommandActions({
     return { fastModeSetting: resolveFastModeSetting(session) };
   }
 
+  function setCompactStrategy(session, strategy) {
+    session.compactStrategy = strategy;
+    saveDb();
+    return { compactStrategy: session.compactStrategy };
+  }
+
   function applyCompactConfig(session, parsed) {
     if (parsed.type === 'reset') {
       session.compactStrategy = null;
@@ -283,6 +289,7 @@ export function createSessionCommandActions({
     setModel,
     setReasoningEffort,
     setFastMode,
+    setCompactStrategy,
     applyCompactConfig,
     setMode,
     startNewSession,

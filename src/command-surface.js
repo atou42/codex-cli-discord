@@ -6,6 +6,7 @@ import {
   slashRef as slashRefBase,
 } from './slash-command-surface.js';
 import { createSlashCommandRouter } from './slash-command-router.js';
+import { createSettingsPanel } from './settings-panel.js';
 import { createTextCommandHandler } from './text-command-handler.js';
 import { createWorkspaceBrowser } from './workspace-browser.js';
 
@@ -16,6 +17,7 @@ export function createCommandSurface({
   enableConfigCmd = false,
   SlashCommandBuilder,
   onboardingOptions = {},
+  settingsPanelOptions = {},
   reportOptions = {},
   workspaceBrowserOptions = {},
   slashRouterOptions = {},
@@ -43,6 +45,14 @@ export function createCommandSurface({
   const onboarding = createOnboardingFlow({
     ...onboardingOptions,
     botProvider,
+    openWorkspaceBrowser: workspaceBrowser.openWorkspaceBrowser,
+    slashRef,
+  });
+
+  const settingsPanel = createSettingsPanel({
+    ...settingsPanelOptions,
+    botProvider,
+    defaultUiLanguage,
     openWorkspaceBrowser: workspaceBrowser.openWorkspaceBrowser,
     slashRef,
   });
@@ -77,6 +87,7 @@ export function createCommandSurface({
     formatCompactStrategyConfigHelp: reports.formatCompactStrategyConfigHelp,
     formatCompactConfigReport: reports.formatCompactConfigReport,
     openWorkspaceBrowser: workspaceBrowser.openWorkspaceBrowser,
+    openSettingsPanel: settingsPanel.openSettingsPanel,
   });
 
   const handleCommand = createTextCommandHandler({
@@ -118,8 +129,12 @@ export function createCommandSurface({
     formatWorkspaceBusyReport: reports.formatWorkspaceBusyReport,
     handleCommand,
     handleOnboardingButtonInteraction: onboarding.handleOnboardingButtonInteraction,
+    handleSettingsPanelInteraction: settingsPanel.handleSettingsPanelInteraction,
+    handleSettingsPanelModalSubmit: settingsPanel.handleSettingsPanelModalSubmit,
     handleWorkspaceBrowserInteraction: workspaceBrowser.handleWorkspaceBrowserInteraction,
     isOnboardingButtonId: onboarding.isOnboardingButtonId,
+    isSettingsPanelComponentId: settingsPanel.isSettingsPanelComponentId,
+    isSettingsPanelModalId: settingsPanel.isSettingsPanelModalId,
     isWorkspaceBrowserComponentId: workspaceBrowser.isWorkspaceBrowserComponentId,
     normalizeSlashCommandName,
     routeSlashCommand,
