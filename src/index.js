@@ -101,7 +101,6 @@ import {
   parseWorkspaceCommandAction,
 } from './session-settings.js';
 import {
-  buildCommandActionButtonId,
   parseCommandActionButtonId,
 } from './slash-command-router.js';
 import {

@@ -323,7 +323,7 @@ export function createPromptProgressReporterFactory({
       syncActiveRun();
       try {
         const body = render('running');
-        progressMessage = await safeReply(message, buildPayload(body, 'running'));
+        progressMessage = await safeReply(message, buildPayload(body));
         lastEmitAt = now();
         lastRendered = body;
         syncActiveRun();
@@ -445,7 +445,7 @@ export function createPromptProgressReporterFactory({
       const safeBody = joinLinesWithinLimit(lines, progressMessageMaxChars, truncate);
 
       try {
-        await progressMessage.edit(buildPayload(safeBody, 'done'));
+        await progressMessage.edit(buildPayload(safeBody));
       } catch {
         // ignore
       }
