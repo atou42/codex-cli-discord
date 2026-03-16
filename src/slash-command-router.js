@@ -23,10 +23,6 @@ function registerSlashHandlers(map, names, handler) {
   }
 }
 
-function normalizePayload(payload) {
-  return typeof payload === 'string' ? { content: payload } : payload;
-}
-
 export function buildCommandActionButtonId(command, userId) {
   const normalizedCommand = String(command || '').trim().toLowerCase();
   const normalizedUserId = String(userId || '').trim();
@@ -103,51 +99,11 @@ export function createSlashCommandRouter({
 } = {}) {
   const handlers = new Map();
 
-  function buildActionButton(command, label, style, userId, { disabled = false } = {}) {
-    return new ButtonBuilder()
-      .setCustomId(buildCommandActionButtonId(command, userId))
-      .setLabel(label)
-      .setStyle(style)
-      .setDisabled(disabled);
-  }
-
-  function buildCommandActionRows({ key, session, userId } = {}) {
-    if (!ActionRowBuilder || !ButtonBuilder || !ButtonStyle || !userId) return [];
-
-    const runtime = getRuntimeSnapshot(key);
-    const canCancel = Boolean(runtime?.running || Number(runtime?.queued || 0) > 0);
-
-    return [
-      new ActionRowBuilder().addComponents(
-        buildActionButton('status', 'Status', ButtonStyle.Secondary, userId),
-        buildActionButton('sessions', 'Sessions', ButtonStyle.Secondary, userId),
-        buildActionButton('queue', 'Queue', ButtonStyle.Secondary, userId),
-        buildActionButton('progress', 'Progress', ButtonStyle.Secondary, userId),
-      ),
-      new ActionRowBuilder().addComponents(
-        buildActionButton('new', 'New', ButtonStyle.Primary, userId),
-        buildActionButton('cancel', 'Cancel', ButtonStyle.Danger, userId, { disabled: !canCancel }),
-      ),
-    ];
-  }
-
-  function withCommandActions(payload, { key, session, userId } = {}) {
-    const body = normalizePayload(payload);
-    if (!body) return body;
-
-    const rows = buildCommandActionRows({ key, session, userId });
-    if (!rows.length) return body;
-    return {
-      ...body,
-      components: rows,
-    };
-  }
-
   registerSlashHandlers(handlers, ['status'], async ({ interaction, key, session, respond }) => {
-    await respond(withCommandActions({
+    await respond({
       content: formatStatusReport(key, session, interaction.channel),
       flags: 64,
-    }, { key, session, userId: interaction.user.id }));
+    });
   });
 
   registerSlashHandlers(handlers, ['new'], async ({ interaction, key, session, respond }) => {
@@ -157,35 +113,35 @@ export function createSlashCommandRouter({
     if (outcome.cancelledRunning) lines.push('当前运行中的任务已尝试取消。');
     if (outcome.clearedQueued > 0) lines.push(`已清空 ${outcome.clearedQueued} 个排队任务。`);
     lines.push('下一条普通消息会开启新的上下文。');
-    await respond(withCommandActions({
+    await respond({
       content: lines.join('\n'),
       flags: 64,
-    }, { key, session, userId: interaction.user.id }));
+    });
   });
 
   registerSlashHandlers(handlers, ['reset'], async ({ interaction, key, session, respond }) => {
     commandActions.resetSession(session);
-    await respond(withCommandActions({
+    await respond({
       content: '♻️ 会话与额外配置已清空，下条消息新开上下文。',
       flags: 64,
-    }, { key, session, userId: interaction.user.id }));
+    });
   });
 
   registerSlashHandlers(handlers, ['sessions'], async ({ interaction, key, session, respond }) => {
     try {
-      await respond(withCommandActions({
+      await respond({
         content: commandActions.formatRecentSessionsReport({
           key,
           session,
           resumeRef: slashRef('resume'),
         }),
         flags: 64,
-      }, { key, session, userId: interaction.user.id }));
+      });
     } catch (err) {
-      await respond(withCommandActions({
+      await respond({
         content: `❌ ${safeError(err)}`,
         flags: 64,
-      }, { key, session, userId: interaction.user.id }));
+      });
     }
   });
 
@@ -368,17 +324,17 @@ export function createSlashCommandRouter({
   });
 
   registerSlashHandlers(handlers, ['queue'], async ({ interaction, key, session, respond }) => {
-    await respond(withCommandActions({
+    await respond({
       content: formatQueueReport(key, session, interaction.channel),
       flags: 64,
-    }, { key, session, userId: interaction.user.id }));
+    });
   });
 
   registerSlashHandlers(handlers, ['doctor'], async ({ interaction, key, session, respond }) => {
-    await respond(withCommandActions({
+    await respond({
       content: formatDoctorReport(key, session, interaction.channel),
       flags: 64,
-    }, { key, session, userId: interaction.user.id }));
+    });
   });
 
   registerSlashHandlers(handlers, ['onboarding'], async ({ interaction, key, session, respond }) => {
@@ -394,7 +350,7 @@ export function createSlashCommandRouter({
     const step = 1;
     await respond({
       content: formatOnboardingStepReport(step, key, session, interaction.channel, language),
-      components: buildOnboardingActionRows(step, interaction.user.id, session, language),
+      components: buildOnboardingActionRows(step, key, interaction.user.id, session, language),
       flags: 64,
     });
   });
@@ -478,26 +434,26 @@ export function createSlashCommandRouter({
   });
 
   registerSlashHandlers(handlers, ['progress'], async ({ interaction, key, session, respond }) => {
-    await respond(withCommandActions({
+    await respond({
       content: formatProgressReport(key, session, interaction.channel),
       flags: 64,
-    }, { key, session, userId: interaction.user.id }));
+    });
   });
 
   registerSlashHandlers(handlers, ['cancel', 'abort'], async ({ interaction, key, commandName, session, respond }) => {
     const outcome = cancelChannelWork(key, `slash_${commandName}`);
-    await respond(withCommandActions({
+    await respond({
       content: formatCancelReport(outcome),
       flags: 64,
-    }, { key, session, userId: interaction.user.id }));
+    });
   });
 
   registerSlashHandlers(handlers, ['retry'], async ({ interaction, key, session, respond }) => {
     if (typeof retryLastPrompt !== 'function') {
-      await respond(withCommandActions({
+      await respond({
         content: '❌ 当前环境未启用失败任务重试。',
         flags: 64,
-      }, { key, session, userId: interaction.user.id }));
+      });
       return;
     }
 
@@ -506,20 +462,20 @@ export function createSlashCommandRouter({
       const content = outcome?.reason === 'queue_full' && Number.isFinite(outcome?.maxQueue)
         ? `🚧 当前频道队列已满（上限 ${outcome.maxQueue}），请稍后再试。`
         : '❌ 没有可重试的失败任务。';
-      await respond(withCommandActions({
+      await respond({
         content,
         flags: 64,
-      }, { key, session, userId: interaction.user.id }));
+      });
       return;
     }
 
     const content = outcome.queuedAhead > 0
       ? `🔁 已重新加入队列，前面还有 ${outcome.queuedAhead} 条。`
       : '🔁 已重新加入队列。';
-    await respond(withCommandActions({
+    await respond({
       content,
       flags: 64,
-    }, { key, session, userId: interaction.user.id }));
+    });
   });
 
   return async function routeSlashCommand({ interaction, commandName, respond } = {}) {

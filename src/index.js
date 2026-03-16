@@ -464,6 +464,7 @@ const appContext = createAppContext({
       ButtonStyle,
       getCliHealth,
       normalizeUiLanguage,
+      getProviderDisplayName,
       formatCliHealth,
       formatLanguageLabel,
       formatSecurityProfileLabel,

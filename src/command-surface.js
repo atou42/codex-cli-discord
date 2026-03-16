@@ -29,11 +29,6 @@ export function createCommandSurface({
   const normalizeSlashCommandName = (name) => normalizeSlashCommandNameBase(name, slashPrefix);
   const slashRef = (base) => slashRefBase(base, slashPrefix);
 
-  const onboarding = createOnboardingFlow({
-    ...onboardingOptions,
-    slashRef,
-  });
-
   const reports = createReportFormatters({
     ...reportOptions,
     slashRef,
@@ -43,6 +38,13 @@ export function createCommandSurface({
     ...workspaceBrowserOptions,
     formatWorkspaceUpdateReport: reports.formatWorkspaceUpdateReport,
     formatDefaultWorkspaceUpdateReport: reports.formatDefaultWorkspaceUpdateReport,
+  });
+
+  const onboarding = createOnboardingFlow({
+    ...onboardingOptions,
+    botProvider,
+    openWorkspaceBrowser: workspaceBrowser.openWorkspaceBrowser,
+    slashRef,
   });
 
   const routeSlashCommand = createSlashCommandRouter({
