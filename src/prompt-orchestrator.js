@@ -225,6 +225,7 @@ export function createPromptOrchestrator({
     const progress = createProgressReporter({
       message,
       channelState,
+      session,
       language,
       initialLatestStep: waitingForWorkspaceText,
     });

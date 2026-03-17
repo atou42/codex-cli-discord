@@ -377,6 +377,9 @@ export function createReportFormatters({
       return [
         '🧵 **Task Progress**',
         `• runtime: ${formatRuntimeLabel(runtime, lang)}`,
+        resolveFastModeSetting(session)?.supported
+          ? `• fast mode: ${formatFastModeLabel(resolveFastModeSetting(session).enabled, lang)} (${formatSettingSourceLabel(resolveFastModeSetting(session).source, lang)})`
+          : null,
         `• event count: ${runtime.progressEvents}`,
         runtime.progressText ? `• latest activity: ${runtime.progressText}` : null,
         ...processLines,
@@ -387,12 +390,15 @@ export function createReportFormatters({
         runtime.progressMessageId ? `• progress message id: \`${runtime.progressMessageId}\`` : null,
         `• queued prompts: ${runtime.queued}`,
         `• queue limit: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-        `• hint: Use \`!c\` to interrupt, and \`${slashRef('status')}\` to check status.`,
+        '• hint: Use `!c` to interrupt.',
       ].filter(Boolean).join('\n');
     }
     return [
       '🧵 **任务进度**',
       `• 运行状态: ${formatRuntimeLabel(runtime, lang)}`,
+      resolveFastModeSetting(session)?.supported
+        ? `• fast mode: ${formatFastModeLabel(resolveFastModeSetting(session).enabled, lang)}（${formatSettingSourceLabel(resolveFastModeSetting(session).source, lang)}）`
+        : null,
       `• 事件数: ${runtime.progressEvents}`,
       runtime.progressText ? `• 最新活动: ${runtime.progressText}` : null,
       ...processLines,
@@ -403,7 +409,7 @@ export function createReportFormatters({
       runtime.progressMessageId ? `• 进度消息 ID: \`${runtime.progressMessageId}\`` : null,
       `• 排队任务: ${runtime.queued}`,
       `• 队列上限: ${formatQueueLimit(security.maxQueuePerChannel)}`,
-      `• 提示: 可用 \`!c\` 中断，\`${slashRef('status')}\` 查看状态。`,
+      '• 提示: 可用 `!c` 中断。',
     ].filter(Boolean).join('\n');
   }
 

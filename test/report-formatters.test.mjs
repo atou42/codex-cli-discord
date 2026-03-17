@@ -74,6 +74,11 @@ function createFormatters(overrides = {}) {
     }),
     resolveSecurityContext: () => ({ mentionOnly: false, maxQueuePerChannel: 20, profile: 'team' }),
     resolveTimeoutSetting: () => ({ timeoutMs: 60_000, source: 'session override' }),
+    resolveFastModeSetting: (session) => ({
+      enabled: Boolean(session?.fastMode),
+      supported: session?.provider !== 'claude' && session?.provider !== 'gemini',
+      source: session?.fastMode ? 'session override' : 'config.toml',
+    }),
     getEffectiveSecurityProfile: () => ({ profile: 'public', source: 'session override' }),
     resolveCompactStrategySetting: () => ({ strategy: 'native', source: 'session override' }),
     resolveCompactEnabledSetting: () => ({ enabled: true, source: 'env default' }),
@@ -212,7 +217,8 @@ test('createReportFormatters.formatProgressReport keeps running hints minimal', 
   const report = formatters.formatProgressReport('thread-1', { language: 'zh' }, { id: 'channel-1' });
 
   assert.match(report, /`!c`/);
-  assert.match(report, /`\/bot-status`/);
+  assert.match(report, /fast mode: 关闭（config\.toml）/);
+  assert.doesNotMatch(report, /`\/bot-status`/);
   assert.doesNotMatch(report, /!cancel/);
   assert.doesNotMatch(report, /\/bot-cancel/);
 });

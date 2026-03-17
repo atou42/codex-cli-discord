@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-03-17
+
+### Fixed
+- Restored the progress-card hint to the intended minimal `!c` wording instead of showing legacy cancel aliases and extra command noise.
+- Added the effective Fast mode state to the running progress/status message flow so thread conversations can see whether Fast mode is on and where it is inherited from.
+
 ## [0.9.0] - 2026-03-17
 
 ### Added

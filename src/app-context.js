@@ -128,6 +128,7 @@ export function createAppContext({
       setSessionId: identity.setSessionId,
       getSessionProvider: identity.getSessionProvider,
       getSessionLanguage: sessionSettings.getSessionLanguage,
+      resolveFastModeSetting: sessionSettings.resolveFastModeSetting,
       resolveTimeoutSetting: sessionSettings.resolveTimeoutSetting,
       resolveTaskRetrySetting: sessionSettings.resolveTaskRetrySetting,
       resolveCompactStrategySetting: sessionSettings.resolveCompactStrategySetting,

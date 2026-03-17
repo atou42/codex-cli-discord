@@ -106,6 +106,30 @@ function getFinalLatestStep({
   return String(latestStep || '').trim() || (language === 'en' ? 'Task failed' : '任务失败');
 }
 
+function formatFastModeSource(source, language = 'en') {
+  const value = String(source || '').trim().toLowerCase();
+  if (language === 'en') {
+    if (value === 'session override') return 'this channel';
+    if (value === 'parent channel') return 'parent channel';
+    if (value === 'config.toml') return 'global config';
+    return value || 'unknown';
+  }
+  if (value === 'session override') return '当前频道';
+  if (value === 'parent channel') return '父频道默认';
+  if (value === 'config.toml') return '全局配置';
+  return value || '未知';
+}
+
+function formatFastModeValue(setting, language = 'en') {
+  if (!setting?.supported) return null;
+  const enabled = setting.enabled
+    ? (language === 'en' ? 'on' : '开启')
+    : (language === 'en' ? 'off' : '关闭');
+  return language === 'en'
+    ? `${enabled} (${formatFastModeSource(setting.source, language)})`
+    : `${enabled}（${formatFastModeSource(setting.source, language)}）`;
+}
+
 export function createPromptProgressReporterFactory({
   defaultUiLanguage = 'zh',
   progressUpdatesEnabled = true,
@@ -123,6 +147,7 @@ export function createPromptProgressReporterFactory({
   safeReply = async () => null,
   normalizeUiLanguage = defaultNormalizeUiLanguage,
   slashRef = (name) => `/${name}`,
+  resolveFastModeSetting = () => ({ enabled: false, supported: false, source: 'provider unsupported' }),
   truncate = defaultTruncate,
   humanElapsed = (ms) => `${ms}ms`,
   createProgressEventDeduper = () => () => false,
@@ -151,6 +176,7 @@ export function createPromptProgressReporterFactory({
   return function createProgressReporter({
     message,
     channelState,
+    session = null,
     language = defaultUiLanguage,
     processLines = progressProcessLines,
     initialLatestStep = '',
@@ -208,13 +234,14 @@ export function createPromptProgressReporterFactory({
     const render = (status = 'running') => {
       const elapsed = humanElapsed(Math.max(0, now() - startedAt));
       const phase = formatRuntimePhaseLabel(channelState?.activeRun?.phase || 'starting', lang);
+      const fastMode = formatFastModeValue(resolveFastModeSetting(session), lang);
       const hint = status === 'running'
         ? (lang === 'en'
-          ? `Use \`!c\` to interrupt, and \`${slashRef('status')}\` for details.`
-          : `可用 \`!c\` 中断，\`${slashRef('status')}\` 查看状态。`)
+          ? 'Use `!c` to interrupt.'
+          : '可用 `!c` 中断。')
         : (lang === 'en'
-          ? 'You can continue with a new message, or check remaining backlog with `!queue`.'
-          : '可继续发送新消息，或用 `!queue` 查看是否还有排队任务。');
+          ? 'Send the next message when ready.'
+          : '准备好后直接发送下一条消息。');
       const statusLine = status === 'running'
         ? (lang === 'en' ? '⏳ **Task Running**' : '⏳ **任务进行中**')
         : status;
@@ -222,6 +249,7 @@ export function createPromptProgressReporterFactory({
         statusLine,
         `${lang === 'en' ? '• elapsed' : '• 耗时'}: ${elapsed}`,
         `${lang === 'en' ? '• phase' : '• 阶段'}: ${phase}`,
+        fastMode ? `${lang === 'en' ? '• fast mode' : '• fast mode'}: ${fastMode}` : null,
         `${lang === 'en' ? '• event count' : '• 事件数'}: ${events}`,
         `${lang === 'en' ? '• latest activity' : '• 最新活动'}: ${latestStep}`,
         ...renderProcessContentLines(recentActivities, lang, processLineLimit),

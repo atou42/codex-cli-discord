@@ -59,6 +59,11 @@ function createHarness(overrides = {}) {
     },
     normalizeUiLanguage: (value) => (String(value || '').trim().toLowerCase() === 'en' ? 'en' : 'zh'),
     slashRef: (name) => `/bot-${name}`,
+    resolveFastModeSetting: (session) => ({
+      enabled: Boolean(session?.fastMode),
+      supported: session?.provider === 'codex',
+      source: session?.fastMode ? 'session override' : 'config.toml',
+    }),
     truncate: (text, max) => {
       const value = String(text || '');
       return value.length <= max ? value : `${value.slice(0, max - 3)}...`;
@@ -109,6 +114,7 @@ function createHarness(overrides = {}) {
     reporter: createProgressReporter({
       message,
       channelState,
+      session: overrides.session || { provider: 'codex', fastMode: true },
       language: overrides.language || 'en',
       initialLatestStep: overrides.initialLatestStep || 'Waiting for workspace lock: /repo/demo',
     }),
@@ -124,8 +130,9 @@ test('createPromptProgressReporterFactory seeds initial step and updates final p
   await harness.reporter.start();
   assert.match(harness.sent[0].content, /Waiting for workspace lock: \/repo\/demo/);
   assert.deepEqual(harness.sent[0].components, []);
+  assert.match(harness.sent[0].content, /fast mode: on \(this channel\)/);
   assert.match(harness.sent[0].content, /!c/);
-  assert.match(harness.sent[0].content, /\/bot-status/);
+  assert.doesNotMatch(harness.sent[0].content, /\/bot-status/);
   assert.doesNotMatch(harness.sent[0].content, /!cancel/);
   assert.equal(harness.channelState.activeRun.lastProgressText, 'Waiting for workspace lock: /repo/demo');
   assert.equal(harness.channelState.activeRun.progressMessageId, 'progress-1');
