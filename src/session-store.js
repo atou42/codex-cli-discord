@@ -439,7 +439,8 @@ export function createSessionStore({
 
     const parentSession = getParentSession(session);
     const parentChannelId = normalizeChannelId(session?.parentChannelId);
-    if (parentSession && parentChannelId) {
+    const parentExplicitWorkspaceDir = normalizeWorkspaceDir(parentSession?.workspaceDir);
+    if (parentSession && parentChannelId && parentExplicitWorkspaceDir) {
       const parentBinding = getWorkspaceBinding(parentSession, parentChannelId, visited);
       if (parentBinding?.workspaceDir) {
         return {

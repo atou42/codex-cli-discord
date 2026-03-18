@@ -201,6 +201,46 @@ test('createSessionStore lets a thread inherit the parent channel workspace bind
   assert.equal(binding.parentChannelId, 'channel-1');
 });
 
+test('createSessionStore keeps thread legacy fallback isolated when parent has no explicit workspace override', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cli-discord-session-store-'));
+  const dataFile = path.join(root, 'sessions.json');
+  const workspaceRoot = path.join(root, 'workspaces');
+
+  const store = createSessionStore({
+    dataFile,
+    workspaceRoot,
+    defaults: {
+      provider: 'codex',
+      mode: 'safe',
+      language: 'zh',
+      onboardingEnabled: true,
+    },
+    getSessionId: (session) => String(session?.runnerSessionId || session?.codexThreadId || '').trim() || null,
+    normalizeProvider,
+    normalizeUiLanguage,
+    normalizeSessionSecurityProfile,
+    normalizeSessionTimeoutMs,
+    normalizeSessionCompactStrategy,
+    normalizeSessionCompactEnabled,
+    normalizeSessionCompactTokenLimit,
+  });
+
+  store.getSession('channel-1');
+  const threadSession = store.getSession('thread-1', {
+    channel: {
+      parentId: 'channel-1',
+      isThread: () => true,
+    },
+  });
+  const binding = store.getWorkspaceBinding(threadSession, 'thread-1');
+  const workspaceDir = store.ensureWorkspace(threadSession, 'thread-1');
+
+  assert.equal(binding.workspaceDir, path.join(workspaceRoot, 'thread-1'));
+  assert.equal(binding.source, 'legacy fallback');
+  assert.equal(workspaceDir, path.join(workspaceRoot, 'thread-1'));
+  assert.equal(fs.existsSync(path.join(workspaceRoot, 'channel-1')), false);
+});
+
 test('createSessionStore migrates persisted legacy thread workspace to null so defaults can apply', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cli-discord-session-store-'));
   const dataFile = path.join(root, 'sessions.json');
