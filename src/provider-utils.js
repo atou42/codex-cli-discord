@@ -91,7 +91,7 @@ function buildCodexArgs({
   if (typeof fastMode === 'boolean') {
     common.push('-c', `features.fast_mode=${fastMode ? 'true' : 'false'}`);
   }
-  if (compactStrategy === 'native' && compactOnThreshold && !sessionId) {
+  if (compactStrategy === 'native' && compactOnThreshold) {
     common.push('-c', `model_auto_compact_token_limit=${modelAutoCompactTokenLimit}`);
   }
   for (const cfg of extraConfigs || []) common.push('-c', cfg);

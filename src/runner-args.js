@@ -69,7 +69,7 @@ export function createRunnerArgsBuilder({
     if (fastMode.source === 'session override' || fastMode.source === 'parent channel') {
       common.push('-c', `features.fast_mode=${fastMode.enabled ? 'true' : 'false'}`);
     }
-    if (compactSetting.strategy === 'native' && compactEnabled.enabled && !sessionId) {
+    if (compactSetting.strategy === 'native' && compactEnabled.enabled) {
       common.push('-c', `model_auto_compact_token_limit=${nativeLimit.tokens}`);
     }
     for (const cfg of extraConfigs) common.push('-c', cfg);

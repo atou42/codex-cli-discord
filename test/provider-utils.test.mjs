@@ -47,7 +47,7 @@ test('provider capabilities distinguish shared native compact vs codex-only pass
   assert.equal(providerSupportsNativeCompact('gemini'), true);
 });
 
-test('buildRunnerArgs keeps codex resume behavior', () => {
+test('buildRunnerArgs keeps codex resume behavior and native compact config', () => {
   const args = buildRunnerArgs({
     provider: 'codex',
     sessionId: 'abc-123',
@@ -75,16 +75,18 @@ test('buildRunnerArgs keeps codex resume behavior', () => {
     '-c',
     'features.fast_mode=true',
     '-c',
+    'model_auto_compact_token_limit=1234',
+    '-c',
     'personality="concise"',
     'abc-123',
     'fix it',
   ]);
 });
 
-test('buildRunnerArgs still forwards native compact config for a fresh codex session', () => {
+test('buildRunnerArgs still forwards native compact config for a resumed codex session', () => {
   const args = buildRunnerArgs({
     provider: 'codex',
-    sessionId: null,
+    sessionId: 'abc-123',
     workspaceDir: '/tmp/work',
     prompt: 'fix it',
     mode: 'dangerous',
@@ -99,11 +101,9 @@ test('buildRunnerArgs still forwards native compact config for a fresh codex ses
 
   assert.deepEqual(args, [
     'exec',
+    'resume',
     '--json',
-    '--skip-git-repo-check',
     '--dangerously-bypass-approvals-and-sandbox',
-    '-C',
-    '/tmp/work',
     '-m',
     'o3',
     '-c',
@@ -114,6 +114,7 @@ test('buildRunnerArgs still forwards native compact config for a fresh codex ses
     'model_auto_compact_token_limit=1234',
     '-c',
     'personality="concise"',
+    'abc-123',
     'fix it',
   ]);
 });
