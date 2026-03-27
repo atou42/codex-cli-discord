@@ -89,6 +89,225 @@ function normalizeActivityKey(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+function normalizeProgressEventType(value) {
+  return String(value || '').trim().toLowerCase().replace(/[./-]/g, '_');
+}
+
+function normalizeProgressText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function parseProgressJsonMaybe(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (!(text.startsWith('{') || text.startsWith('['))) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function summarizeClaudeToolInput(input, truncateText, previewChars) {
+  if (!input || typeof input !== 'object') return '';
+
+  const command = normalizeProgressText(input.command || input.cmd || '');
+  if (command) return `run: ${truncateText(command, previewChars)}`;
+
+  const query = normalizeProgressText(input.query || input.q || '');
+  if (query) return `search: ${truncateText(query, previewChars)}`;
+
+  const filePath = normalizeProgressText(input.file_path || input.path || '');
+  if (filePath) return `file_path: ${truncateText(filePath, previewChars)}`;
+
+  const url = normalizeProgressText(input.url || '');
+  if (url) return `url: ${truncateText(url, previewChars)}`;
+
+  const pattern = normalizeProgressText(input.pattern || '');
+  if (pattern) return `find: ${truncateText(pattern, previewChars)}`;
+
+  const description = normalizeProgressText(input.description || '');
+  if (description) return truncateText(description, previewChars);
+
+  return '';
+}
+
+function formatClaudeToolUseLabel(block, truncateText, previewChars) {
+  const toolName = normalizeProgressText(block?.name || 'tool') || 'tool';
+  const detail = summarizeClaudeToolInput(block?.input, truncateText, previewChars);
+  return detail ? `${toolName}: ${detail}` : `tool ${toolName}`;
+}
+
+function createClaudeProgressTracker({ truncateText, previewChars }) {
+  const activeBlocks = new Map();
+  const finalizedBlocks = [];
+  const toolUseLabelsById = new Map();
+
+  function resetMessage() {
+    activeBlocks.clear();
+    finalizedBlocks.length = 0;
+  }
+
+  function finalizeBlock(index) {
+    if (!activeBlocks.has(index)) return;
+    const block = activeBlocks.get(index);
+    activeBlocks.delete(index);
+    if (!block) return;
+
+    if (block.kind === 'text') {
+      const text = normalizeProgressText(block.text);
+      if (text) finalizedBlocks.push({ kind: 'text', text });
+      return;
+    }
+
+    if (block.kind === 'tool_use') {
+      let mergedInput = block.input && typeof block.input === 'object' ? { ...block.input } : {};
+      const parsed = parseProgressJsonMaybe(block.partialInput);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        mergedInput = { ...mergedInput, ...parsed };
+      }
+      const next = {
+        kind: 'tool_use',
+        id: normalizeProgressText(block.id),
+        name: normalizeProgressText(block.name || 'tool') || 'tool',
+        input: mergedInput,
+      };
+      finalizedBlocks.push(next);
+      if (next.id) {
+        toolUseLabelsById.set(next.id, formatClaudeToolUseLabel(next, truncateText, previewChars));
+      }
+    }
+  }
+
+  function consumeMessageBoundary(stopReason) {
+    const normalizedStopReason = normalizeProgressEventType(stopReason);
+    const summaryCandidates = [];
+    const rawActivities = [];
+
+    for (const block of finalizedBlocks.splice(0)) {
+      if (block.kind === 'tool_use') {
+        const label = formatClaudeToolUseLabel(block, truncateText, previewChars);
+        summaryCandidates.push(label);
+        rawActivities.push(label);
+        continue;
+      }
+
+      if (block.kind === 'text' && normalizedStopReason !== 'end_turn') {
+        const text = truncateText(block.text, previewChars);
+        if (text) {
+          summaryCandidates.push(`agent message: ${text}`);
+          rawActivities.push(text);
+        }
+      }
+    }
+
+    return {
+      summaryStep: summaryCandidates[summaryCandidates.length - 1] || '',
+      rawActivities,
+      completedSteps: [],
+    };
+  }
+
+  function consumeToolResult(event) {
+    if (!event || typeof event !== 'object') return null;
+    const parts = Array.isArray(event?.message?.content) ? event.message.content : [];
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      if (normalizeProgressEventType(part.type || '') !== 'tool_result') continue;
+      const toolUseId = normalizeProgressText(part.tool_use_id || '');
+      if (!toolUseId) continue;
+      const label = toolUseLabelsById.get(toolUseId);
+      if (!label) continue;
+      return {
+        summaryStep: `${label} completed`,
+        rawActivities: [],
+        completedSteps: [label],
+      };
+    }
+    return null;
+  }
+
+  function capture(event) {
+    const type = normalizeProgressEventType(event?.type || '');
+    if (!type) return null;
+
+    if (type === 'stream_event' && event.event && typeof event.event === 'object') {
+      const nestedType = normalizeProgressEventType(event.event.type || '');
+      if (nestedType === 'message_start') {
+        resetMessage();
+        return null;
+      }
+
+      if (nestedType === 'content_block_start') {
+        const index = Number(event.event.index);
+        if (!Number.isFinite(index)) return null;
+        const block = event.event.content_block && typeof event.event.content_block === 'object'
+          ? event.event.content_block
+          : {};
+        const blockType = normalizeProgressEventType(block.type || '');
+        if (blockType === 'text') {
+          activeBlocks.set(index, {
+            kind: 'text',
+            text: String(block.text || ''),
+          });
+        } else if (blockType === 'tool_use') {
+          activeBlocks.set(index, {
+            kind: 'tool_use',
+            id: block.id,
+            name: block.name || block.tool_name || 'tool',
+            input: block.input && typeof block.input === 'object' ? block.input : {},
+            partialInput: '',
+          });
+        }
+        return null;
+      }
+
+      if (nestedType === 'content_block_delta') {
+        const index = Number(event.event.index);
+        if (!Number.isFinite(index) || !activeBlocks.has(index)) return null;
+        const block = activeBlocks.get(index);
+        const delta = event.event.delta && typeof event.event.delta === 'object' ? event.event.delta : {};
+        const deltaType = normalizeProgressEventType(delta.type || '');
+        if (block.kind === 'text' && deltaType === 'text_delta' && typeof delta.text === 'string') {
+          block.text = `${block.text || ''}${delta.text}`;
+        } else if (block.kind === 'tool_use' && deltaType === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          block.partialInput = `${block.partialInput || ''}${delta.partial_json}`;
+        }
+        return null;
+      }
+
+      if (nestedType === 'content_block_stop') {
+        finalizeBlock(Number(event.event.index));
+        return null;
+      }
+
+      if (nestedType === 'message_delta') {
+        return consumeMessageBoundary(
+          event.event.delta?.stop_reason
+          || event.event.delta?.stopReason
+          || '',
+        );
+      }
+
+      if (nestedType === 'message_stop') {
+        resetMessage();
+      }
+
+      return null;
+    }
+
+    if (type === 'user') {
+      return consumeToolResult(event);
+    }
+
+    return null;
+  }
+
+  return {
+    capture,
+  };
+}
+
 function getFinalLatestStep({
   ok = false,
   cancelled = false,
@@ -231,6 +450,10 @@ export function createPromptProgressReporterFactory({
     const isDuplicateProgressEvent = createProgressEventDeduper({
       ttlMs: progressEventDedupeWindowMs,
       maxKeys: 700,
+    });
+    const claudeProgressTracker = createClaudeProgressTracker({
+      truncateText: truncate,
+      previewChars: progressTextPreviewChars,
     });
 
     const syncActiveRun = () => {
@@ -390,14 +613,27 @@ export function createPromptProgressReporterFactory({
 
     const onEvent = (event) => {
       if (stopped) return;
-      const summaryStep = summarizeCodexEvent(event);
-      const rawActivity = extractRawProgressTextFromEvent(event);
+      const providerProgress = session?.provider === 'claude'
+        ? (claudeProgressTracker.capture(event) || null)
+        : null;
+      const summaryStep = providerProgress?.summaryStep || summarizeCodexEvent(event);
+      const rawActivities = providerProgress?.rawActivities?.length
+        ? providerProgress.rawActivities
+        : (() => {
+          const raw = extractRawProgressTextFromEvent(event);
+          return raw ? [raw] : [];
+        })();
       const nextPlan = extractPlanStateFromEvent(event);
-      const completedStep = extractCompletedStepFromEvent(event);
+      const completedStepsFromEvent = providerProgress?.completedSteps?.length
+        ? providerProgress.completedSteps
+        : (() => {
+          const step = extractCompletedStepFromEvent(event);
+          return step ? [step] : [];
+        })();
       const dedupeKey = buildProgressEventDedupeKey({
         summaryStep,
-        rawActivity,
-        completedStep,
+        rawActivity: rawActivities.join(' || '),
+        completedStep: completedStepsFromEvent.join(' || '),
         planSummary: formatProgressPlanSummary(nextPlan),
       });
       if (isDuplicateProgressEvent(dedupeKey)) return;
@@ -408,7 +644,8 @@ export function createPromptProgressReporterFactory({
       } else if (!latestStep) {
         latestStep = summaryStep;
       }
-      if (rawActivity) {
+      for (const rawActivity of rawActivities) {
+        if (!rawActivity) continue;
         enqueueActivity(rawActivity);
         if (recentActivities.length === 0) {
           pushOneActivity({ force: true });
@@ -424,7 +661,9 @@ export function createPromptProgressReporterFactory({
           }
         }
       }
-      if (completedStep) appendCompletedStep(completedSteps, completedStep);
+      for (const completedStep of completedStepsFromEvent) {
+        if (completedStep) appendCompletedStep(completedSteps, completedStep);
+      }
       syncActiveRun();
       void emit(false);
     };

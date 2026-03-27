@@ -236,3 +236,119 @@ test('createPromptProgressReporterFactory truncates overflowing cards on line bo
   const finalCard = harness.edits[harness.edits.length - 1].content;
   assert.match(finalCard, /\n\.\.\.$/);
 });
+
+test('createPromptProgressReporterFactory derives Claude commentary and tool progress from stream events', async () => {
+  const harness = createHarness({
+    session: { provider: 'claude' },
+  });
+
+  await harness.reporter.start();
+  harness.channelState.activeRun.phase = 'exec';
+
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'message_start',
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_start',
+      index: 0,
+      content_block: {
+        type: 'text',
+        text: '',
+      },
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      index: 0,
+      delta: {
+        type: 'text_delta',
+        text: '我来查看',
+      },
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      index: 0,
+      delta: {
+        type: 'text_delta',
+        text: '当前目录。',
+      },
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_stop',
+      index: 0,
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_start',
+      index: 1,
+      content_block: {
+        type: 'tool_use',
+        id: 'call_pwd',
+        name: 'Bash',
+        input: {},
+      },
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      index: 1,
+      delta: {
+        type: 'input_json_delta',
+        partial_json: '{"command":"pwd","description":"Show current working directory"}',
+      },
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_stop',
+      index: 1,
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'stream_event',
+    event: {
+      type: 'message_delta',
+      delta: {
+        stop_reason: 'tool_use',
+      },
+    },
+  });
+  harness.reporter.onEvent({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'call_pwd',
+          content: '/tmp/demo',
+        },
+      ],
+    },
+  });
+
+  await harness.reporter.finish({ ok: true });
+
+  const finalCard = harness.edits[harness.edits.length - 1].content;
+  assert.match(finalCard, /process: 我来查看当前目录。/);
+  assert.match(finalCard, /process: Bash: run: pwd/);
+  assert.match(finalCard, /done: Bash: run: pwd/);
+});
