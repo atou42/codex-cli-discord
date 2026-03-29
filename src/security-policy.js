@@ -56,6 +56,8 @@ export function createSecurityPolicy({
   securityProfile = 'auto',
   securityProfileDefaults = {},
   mentionOnlyOverride = null,
+  mentionOnlyEnabledGuildIds = null,
+  mentionOnlyDisabledGuildIds = null,
   maxQueuePerChannelOverride = null,
   enableConfigCmd = false,
   configPolicy = { allowAll: false, keys: new Set() },
@@ -84,6 +86,20 @@ export function createSecurityPolicy({
     return `${Math.floor(n)}`;
   }
 
+  function resolveGuildId(channel) {
+    const baseChannel = channel?.isThread?.() ? (channel.parent || null) : channel;
+    const guildId = baseChannel?.guild?.id || channel?.guild?.id || '';
+    const normalized = String(guildId || '').trim();
+    return normalized || null;
+  }
+
+  function resolveMentionOnly(defaults, channel) {
+    const guildId = resolveGuildId(channel);
+    if (guildId && mentionOnlyEnabledGuildIds?.has(guildId)) return true;
+    if (guildId && mentionOnlyDisabledGuildIds?.has(guildId)) return false;
+    return mentionOnlyOverride === null ? defaults.mentionOnly : mentionOnlyOverride;
+  }
+
   function resolveSecurityContext(channel, session = null) {
     const configured = getEffectiveSecurityProfile(session);
     const resolved = resolveSecurityProfileForChannel(channel, configured.profile, configured.source);
@@ -97,7 +113,7 @@ export function createSecurityPolicy({
       profile: resolved.profile,
       source: resolved.source,
       reason: resolved.reason,
-      mentionOnly: mentionOnlyOverride === null ? defaults.mentionOnly : mentionOnlyOverride,
+      mentionOnly: resolveMentionOnly(defaults, channel),
       maxQueuePerChannel: maxQueuePerChannelOverride === null ? defaults.maxQueuePerChannel : maxQueuePerChannelOverride,
     };
   }

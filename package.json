@@ -11,6 +11,7 @@
     "start:codex": "node scripts/start-instance.mjs codex",
     "start:claude": "node scripts/start-instance.mjs claude",
     "start:gemini": "node scripts/start-instance.mjs gemini",
+    "send:channel": "node scripts/send-channel-message.mjs",
     "dev": "node --watch src/index.js",
     "dev:codex": "BOT_PROVIDER=codex node --watch src/index.js",
     "dev:claude": "BOT_PROVIDER=claude node --watch src/index.js",

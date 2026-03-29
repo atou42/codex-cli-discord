@@ -101,6 +101,51 @@ test('security-policy resolves auto and manual channel security contexts', () =>
   assert.equal(manualSecurity.reason, 'session override: public');
 });
 
+test('security-policy supports per-guild mention-only overrides', () => {
+  const policy = createSecurityPolicy({
+    securityProfile: 'auto',
+    securityProfileDefaults: {
+      solo: { mentionOnly: false, maxQueuePerChannel: 0 },
+      team: { mentionOnly: false, maxQueuePerChannel: 20 },
+      public: { mentionOnly: true, maxQueuePerChannel: 20 },
+    },
+    mentionOnlyOverride: false,
+    mentionOnlyEnabledGuildIds: parseCsvSet('guild-force-mention'),
+    mentionOnlyDisabledGuildIds: parseCsvSet('guild-no-mention'),
+    maxQueuePerChannelOverride: null,
+    getEffectiveSecurityProfile: () => ({ profile: 'auto', source: 'env default' }),
+    permissionFlagsBits: { ViewChannel: 'VIEW' },
+  });
+
+  const forcedMention = policy.resolveSecurityContext({
+    ...createGuildChannel({ canView: false }),
+    guild: {
+      roles: { everyone: { id: 'everyone' } },
+      id: 'guild-force-mention',
+    },
+    permissionsFor(role) {
+      assert.equal(role.id, 'everyone');
+      return { has: () => false };
+    },
+  }, {});
+  const disabledMention = policy.resolveSecurityContext({
+    ...createGuildChannel({ canView: true }),
+    guild: {
+      roles: { everyone: { id: 'everyone' } },
+      id: 'guild-no-mention',
+    },
+    permissionsFor(role) {
+      assert.equal(role.id, 'everyone');
+      return { has: () => true };
+    },
+  }, {});
+  const fallbackMention = policy.resolveSecurityContext(createGuildChannel({ canView: true }), {});
+
+  assert.equal(forcedMention.mentionOnly, true);
+  assert.equal(disabledMention.mentionOnly, false);
+  assert.equal(fallbackMention.mentionOnly, false);
+});
+
 test('security-policy formats security profile display for localized output', () => {
   const policy = createSecurityPolicy();
 

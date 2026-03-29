@@ -139,6 +139,8 @@ npm run start:gemini
 - `SECURITY_PROFILE`：`auto | solo | team | public`
   - `auto`：DM -> `solo`；服务器内若 `@everyone` 可见频道则 `public`；否则 `team`
 - `MENTION_ONLY`：普通消息是否必须 @Bot（留空则使用 profile 默认）
+- `MENTION_ONLY_ENABLED_GUILD_IDS`：逗号分隔的 guild ID 列表；这些服务器里普通消息必须 @Bot，优先级高于 `MENTION_ONLY`
+- `MENTION_ONLY_DISABLED_GUILD_IDS`：逗号分隔的 guild ID 列表；这些服务器里普通消息不必 @Bot，优先级高于 `MENTION_ONLY`
 - `MAX_QUEUE_PER_CHANNEL`：每频道最大排队数（`0` 表示无限制；留空则使用 profile 默认）
 - `ENABLE_CONFIG_CMD`：是否启用 `!config`（默认 `false`）
 - `CONFIG_ALLOWLIST`：`!config key=value` 允许的 key（逗号分隔，或 `*` 表示全部允许）
@@ -316,6 +318,27 @@ INSECURE_TLS=1
 ```
 
 （强烈不推荐。优先使用干净的 SOCKS 隧道。）
+
+## 本地主动发消息
+
+如果你希望从本机 shell / 其他自动化流程里，直接用 bot token 往指定频道发一条消息，可以用：
+
+```bash
+npm run send:channel -- --channel 1487823042121040036 --content "部署完成"
+```
+
+也支持多行文本和 provider 级 token：
+
+```bash
+cat notice.md | npm run send:channel -- --channel 1487823042121040036 --stdin
+npm run send:channel -- --channel 1487823042121040036 --content "hello" --provider codex
+```
+
+说明：
+
+- 默认复用当前 `.env` 里的 Discord token、代理和 `BOT_PROVIDER`
+- `--provider shared|codex|claude|gemini` 可显式选择用哪组 token
+- 内容来源三选一：`--content`、`--content-file`、`--stdin`
 
 ## 独立运行说明
 

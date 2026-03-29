@@ -198,6 +198,12 @@ const SECURITY_PROFILE_DEFAULTS = Object.freeze({
   public: { mentionOnly: true, maxQueuePerChannel: 20 },
 });
 const MENTION_ONLY_OVERRIDE = parseOptionalBool(process.env.MENTION_ONLY);
+const MENTION_ONLY_ENABLED_GUILD_IDS = parseCsvSet(
+  resolveProviderScopedEnv('MENTION_ONLY_ENABLED_GUILD_IDS', BOT_PROVIDER, process.env),
+);
+const MENTION_ONLY_DISABLED_GUILD_IDS = parseCsvSet(
+  resolveProviderScopedEnv('MENTION_ONLY_DISABLED_GUILD_IDS', BOT_PROVIDER, process.env),
+);
 const MAX_QUEUE_PER_CHANNEL_OVERRIDE = normalizeQueueLimit(process.env.MAX_QUEUE_PER_CHANNEL);
 const ENABLE_CONFIG_CMD = String(process.env.ENABLE_CONFIG_CMD || 'false').toLowerCase() === 'true';
 const CONFIG_POLICY = parseConfigAllowlist(
@@ -334,6 +340,8 @@ const appContext = createAppContext({
     securityProfile: SECURITY_PROFILE,
     securityProfileDefaults: SECURITY_PROFILE_DEFAULTS,
     mentionOnlyOverride: MENTION_ONLY_OVERRIDE,
+    mentionOnlyEnabledGuildIds: MENTION_ONLY_ENABLED_GUILD_IDS,
+    mentionOnlyDisabledGuildIds: MENTION_ONLY_DISABLED_GUILD_IDS,
     maxQueuePerChannelOverride: MAX_QUEUE_PER_CHANNEL_OVERRIDE,
     enableConfigCmd: ENABLE_CONFIG_CMD,
     configPolicy: CONFIG_POLICY,
@@ -625,6 +633,8 @@ console.log([
   `• SLASH_PREFIX=${SLASH_PREFIX || '(none)'}`,
   `• SECURITY_PROFILE=${SECURITY_PROFILE}`,
   `• MENTION_ONLY=${MENTION_ONLY_OVERRIDE === null ? 'profile-default' : MENTION_ONLY_OVERRIDE}`,
+  `• MENTION_ONLY_ENABLED_GUILD_IDS=${MENTION_ONLY_ENABLED_GUILD_IDS?.size ? [...MENTION_ONLY_ENABLED_GUILD_IDS].join(',') : '(none)'}`,
+  `• MENTION_ONLY_DISABLED_GUILD_IDS=${MENTION_ONLY_DISABLED_GUILD_IDS?.size ? [...MENTION_ONLY_DISABLED_GUILD_IDS].join(',') : '(none)'}`,
   `• MAX_QUEUE_PER_CHANNEL=${MAX_QUEUE_PER_CHANNEL_OVERRIDE === null ? 'profile-default' : MAX_QUEUE_PER_CHANNEL_OVERRIDE}`,
   `• ENABLE_CONFIG_CMD=${ENABLE_CONFIG_CMD}`,
   `• CONFIG_ALLOWLIST=${appContext.core.securityPolicy.describeConfigPolicy()}`,

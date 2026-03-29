@@ -139,6 +139,8 @@ Important knobs:
 - `SECURITY_PROFILE`: `auto | solo | team | public`
   - `auto`: DM -> `solo`; guild channel where `@everyone` can view -> `public`; else `team`
 - `MENTION_ONLY`: require bot mention for normal messages (leave empty to use profile default)
+- `MENTION_ONLY_ENABLED_GUILD_IDS`: comma-separated guild IDs; these guilds always require mentioning the bot for normal messages, overriding `MENTION_ONLY`
+- `MENTION_ONLY_DISABLED_GUILD_IDS`: comma-separated guild IDs; these guilds allow normal messages without mentioning the bot, overriding `MENTION_ONLY`
 - `MAX_QUEUE_PER_CHANNEL`: max queued prompts per channel (`0` = unlimited; leave empty to use profile default)
 - `ENABLE_CONFIG_CMD`: enable/disable `!config` command (default `false`)
 - `CONFIG_ALLOWLIST`: allowed keys for `!config key=value` (comma-separated, or `*` to allow all)
@@ -315,6 +317,27 @@ INSECURE_TLS=1
 ```
 
 (Strongly discouraged. Prefer a clean SOCKS tunnel.)
+
+## Local one-shot channel send
+
+If you want to post a message to a Discord channel from the local shell or another automation flow, use:
+
+```bash
+npm run send:channel -- --channel 1487823042121040036 --content "Deploy finished"
+```
+
+It also supports multi-line input and provider-scoped tokens:
+
+```bash
+cat notice.md | npm run send:channel -- --channel 1487823042121040036 --stdin
+npm run send:channel -- --channel 1487823042121040036 --content "hello" --provider codex
+```
+
+Notes:
+
+- By default it reuses the current `.env` Discord token, proxy settings, and `BOT_PROVIDER`
+- Use `--provider shared|codex|claude|gemini` to choose a specific token group
+- Choose exactly one content source: `--content`, `--content-file`, or `--stdin`
 
 ## Standalone runtime notes
 
