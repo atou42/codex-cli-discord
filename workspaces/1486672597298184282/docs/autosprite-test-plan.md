@@ -15,6 +15,7 @@ The test plan exists to answer four questions:
 - do stage permissions reflect real product state
 - are failed and empty states explicit instead of disguised
 - does the layout stay understandable on desktop and mobile
+- do Preview controls produce visible movement, jump, and loop feedback instead of looking alive while doing nothing
 
 ## Test Execution Model
 
@@ -54,6 +55,23 @@ Evidence required:
 - job-state evidence
 - API proof when UI and data disagree
 
+### Delegated Node 4
+
+Preview interaction truthfulness.
+
+Scope:
+
+- scene switch updates the visible scene readout
+- loop start and end sliders clamp to a valid ordered range
+- held horizontal input changes the Avatar position readout
+- jump input changes the Avatar state from grounded to airborne and back
+
+Evidence required:
+
+- Playwright `eval` output for `#preview-scene-readout`, `#preview-position-readout`, and `#preview-loop-readout`
+- command transcript that distinguishes `keydown` from `press` for held input checks
+- one snapshot after Preview is opened so element refs are grounded in a real page state
+
 ### Delegated Node 3
 
 Design and usability review.
@@ -82,6 +100,7 @@ A case is failed when any of the following happens:
 - a failed job is described as pending or still waiting
 - a character appears ready when it is not actually usable
 - mobile hides or buries the only useful next action
+- Preview captions stay frozen after valid keyboard or slider input
 
 ## Required Artifacts Per Test Run
 
@@ -103,3 +122,4 @@ The next frontend fix pass is not done until delegated tests confirm:
 - Preview is inaccessible without a completed render
 - Animate and Preview do not describe failed jobs as merely pending
 - desktop and mobile both show a clear next action in the first screen
+- Preview interaction checks prove scene, loop, movement, and jump captions all change when the user drives them

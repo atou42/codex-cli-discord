@@ -29,6 +29,18 @@ const {
   resolvePreviewRuntimeAction,
   isOneShotPreviewAction,
 } = previewRuntimeApi;
+const previewControlsApi = window.AutoSpritePreviewControls;
+if (!previewControlsApi) {
+  throw new Error("Preview control helpers failed to load.");
+}
+const {
+  DEFAULT_PREVIEW_SCENE_CONSTANTS,
+  normalizePreviewLoopSelection,
+  shouldCapturePreviewKeyboard,
+  getPreviewKeyMapping,
+  canStartPreviewJump,
+  stepPreviewSceneState,
+} = previewControlsApi;
 const workspaceStateApi = window.AutoSpriteWorkspaceState;
 if (!workspaceStateApi) {
   throw new Error("Workspace state helpers failed to load.");
@@ -1084,6 +1096,13 @@ function focusPreviewSceneShell() {
   elements.previewSceneShell.focus({ preventScroll: true });
 }
 
+function schedulePreviewSceneFocus() {
+  focusPreviewSceneShell();
+  window.requestAnimationFrame(() => {
+    focusPreviewSceneShell();
+  });
+}
+
 function selectedActionCount() {
   return state.selectedStandardActionIds.length + state.selectedCustomActionIds.length;
 }
@@ -1211,7 +1230,7 @@ function setStage(stage, { force = false } = {}) {
       drawCurrentPreviewFrame();
       startPreviewLoop();
     }
-    focusPreviewSceneShell();
+    schedulePreviewSceneFocus();
   }
 
   if (stage === "animate") {
@@ -2681,15 +2700,19 @@ function resetPreviewSceneState({ randomizeScene = false } = {}) {
 }
 
 function triggerPreviewJump() {
-  if (!state.activePreview || state.currentStage !== "preview") {
-    return;
-  }
-
-  if (state.previewSceneJumpOffset > 0 || state.previewSceneJumpVelocity !== 0) {
+  if (
+    !canStartPreviewJump({
+      hasActivePreview: Boolean(state.activePreview),
+      currentStage: state.currentStage,
+      jumpOffset: state.previewSceneJumpOffset,
+      jumpVelocity: state.previewSceneJumpVelocity,
+    })
+  ) {
     return;
   }
 
   state.previewSceneJumpVelocity = PREVIEW_SCENE_JUMP_VELOCITY;
+  applyImmediatePreviewSceneInput();
   startPreviewLoop();
 }
 
@@ -2698,34 +2721,41 @@ function updatePreviewSceneState(deltaSeconds) {
     return;
   }
 
-  const horizontalInput = Number(state.previewSceneKeys.right) - Number(state.previewSceneKeys.left);
-  const verticalInput = Number(state.previewSceneKeys.down) - Number(state.previewSceneKeys.up);
+  const nextSceneState = stepPreviewSceneState(
+    {
+      playerX: state.previewScenePlayerX,
+      baseYRatio: state.previewSceneBaseYRatio,
+      jumpOffset: state.previewSceneJumpOffset,
+      jumpVelocity: state.previewSceneJumpVelocity,
+      facing: state.previewSceneFacing,
+    },
+    state.previewSceneKeys,
+    deltaSeconds,
+    {
+      ...DEFAULT_PREVIEW_SCENE_CONSTANTS,
+      worldWidth: PREVIEW_SCENE_WORLD_WIDTH,
+      moveSpeed: PREVIEW_SCENE_MOVE_SPEED,
+      verticalSpeed: PREVIEW_SCENE_VERTICAL_SPEED,
+      gravity: PREVIEW_SCENE_GRAVITY,
+      jumpVelocity: PREVIEW_SCENE_JUMP_VELOCITY,
+    },
+  );
 
-  if (horizontalInput !== 0) {
-    state.previewScenePlayerX = clamp(
-      state.previewScenePlayerX + horizontalInput * PREVIEW_SCENE_MOVE_SPEED * deltaSeconds,
-      0,
-      PREVIEW_SCENE_WORLD_WIDTH,
-    );
-    state.previewSceneFacing = horizontalInput < 0 ? -1 : 1;
+  state.previewScenePlayerX = nextSceneState.playerX;
+  state.previewSceneBaseYRatio = nextSceneState.baseYRatio;
+  state.previewSceneJumpOffset = nextSceneState.jumpOffset;
+  state.previewSceneJumpVelocity = nextSceneState.jumpVelocity;
+  state.previewSceneFacing = nextSceneState.facing;
+}
+
+function applyImmediatePreviewSceneInput() {
+  if (!state.activePreview || state.currentStage !== "preview") {
+    return;
   }
 
-  if (verticalInput !== 0) {
-    state.previewSceneBaseYRatio = clamp(
-      state.previewSceneBaseYRatio + verticalInput * PREVIEW_SCENE_VERTICAL_SPEED * deltaSeconds,
-      0.58,
-      0.82,
-    );
-  }
-
-  if (state.previewSceneJumpOffset > 0 || state.previewSceneJumpVelocity !== 0) {
-    state.previewSceneJumpOffset = Math.max(0, state.previewSceneJumpOffset + state.previewSceneJumpVelocity * deltaSeconds);
-    state.previewSceneJumpVelocity -= PREVIEW_SCENE_GRAVITY * deltaSeconds;
-
-    if (state.previewSceneJumpOffset === 0 && state.previewSceneJumpVelocity < 0) {
-      state.previewSceneJumpVelocity = 0;
-    }
-  }
+  updatePreviewSceneState(1 / 60);
+  syncPreviewRuntimeActionState();
+  drawCurrentPreviewFrame();
 }
 
 function isPreviewSceneGrounded() {
@@ -3244,9 +3274,9 @@ async function loadPreview(spritesheetId) {
     renderPreviewSceneButtons();
     renderPreviewPickers();
     renderPreviewAvailabilityState();
-    focusPreviewSceneShell();
     drawCurrentPreviewFrame();
     startPreviewLoop();
+    schedulePreviewSceneFocus();
   } catch (error) {
     handlePreviewLoadError(error);
   }
@@ -3268,20 +3298,17 @@ function updatePreviewLoopFromInputs(changedEdge) {
     return;
   }
 
-  const start = Number(elements.previewRangeStart.value);
-  const end = Number(elements.previewRangeEnd.value);
+  const nextSelection = normalizePreviewLoopSelection({
+    start: Number(elements.previewRangeStart.value),
+    end: Number(elements.previewRangeEnd.value),
+    changedEdge,
+  });
 
-  if (changedEdge === "start" && start > end) {
-    elements.previewRangeEnd.value = String(start);
-  }
-
-  if (changedEdge === "end" && end < start) {
-    elements.previewRangeStart.value = String(end);
-  }
-
-  state.previewLoopStart = Number(elements.previewRangeStart.value);
-  state.previewLoopEnd = Number(elements.previewRangeEnd.value);
-  state.previewFrameIndex = Math.min(state.previewLoopStart, state.previewLoopEnd);
+  elements.previewRangeStart.value = String(nextSelection.start);
+  elements.previewRangeEnd.value = String(nextSelection.end);
+  state.previewLoopStart = nextSelection.start;
+  state.previewLoopEnd = nextSelection.end;
+  state.previewFrameIndex = nextSelection.frameIndex;
   state.previewLastTick = 0;
   drawCurrentPreviewFrame();
 }
@@ -3307,32 +3334,13 @@ function setPreviewScene(sceneId) {
 }
 
 function isPreviewKeyboardTarget(target) {
-  if (state.currentStage !== "preview" || !state.activePreview) {
-    return false;
-  }
-
-  if (!(target instanceof HTMLElement)) {
-    return true;
-  }
-
-  const tagName = target.tagName;
-  return !["INPUT", "TEXTAREA", "SELECT"].includes(tagName) && !target.isContentEditable;
-}
-
-function getPreviewKeyMapping(key) {
-  if (key === "a" || key === "arrowleft") {
-    return "left";
-  }
-  if (key === "d" || key === "arrowright") {
-    return "right";
-  }
-  if (key === "w" || key === "arrowup") {
-    return "up";
-  }
-  if (key === "s" || key === "arrowdown") {
-    return "down";
-  }
-  return null;
+  return shouldCapturePreviewKeyboard({
+    currentStage: state.currentStage,
+    hasActivePreview: Boolean(state.activePreview),
+    targetTagName: target instanceof HTMLElement ? target.tagName : "",
+    isContentEditable: target instanceof HTMLElement ? target.isContentEditable : false,
+    hasTarget: target instanceof HTMLElement,
+  });
 }
 
 function maybeQueuePreviewModifierAction(modifierKey, actionId) {
@@ -3577,6 +3585,9 @@ window.addEventListener("keydown", (event) => {
       if (state.previewSceneModifiers.crouch) {
         maybeQueuePreviewModifierAction("slide", "slide");
       }
+    }
+    if (!event.repeat) {
+      applyImmediatePreviewSceneInput();
     }
     startPreviewLoop();
     return;

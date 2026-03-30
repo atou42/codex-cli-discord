@@ -26,6 +26,22 @@ Delegated nodes attempted:
 
 The current delegated run now has usable evidence for every originally blocked frontend truthfulness issue.
 
+Additional delegated Preview interaction evidence on 2026-03-31:
+
+- subagent `Fermat` confirmed the local app was reachable at `http://127.0.0.1:3123/`, opened Runtime QA Preview, and verified scene switching to `Amber Dunes`
+- the first browser pass could not prove jump or movement because it used generic key presses and snapshots, which left the Preview readout looking unchanged
+- subagent `Galileo` then used direct DOM reads through Playwright `eval` and confirmed:
+  - `#preview-range-start = 10` plus `#preview-range-end = 5` resolves to loop readout `Frames 6 to 6`
+  - direct `press Space` was still insufficient to prove jump from the readout alone
+- follow-up browser inspection on the same page state confirmed the live Preview shell was focused at `preview-scene-shell`
+- held-key verification then showed the Preview captions are actually live when driven correctly:
+  - `keydown Space` changed `#preview-position-readout` from `13% across · grounded` to `13% across · airborne`
+  - `keyup Space` returned the readout to `13% across · grounded`
+  - `keydown ArrowRight` changed the readout to `67% across · grounded`
+- one later browser pass still showed an unresolved first-input ambiguity:
+  - after opening Preview, `activeElement.id` could already be `preview-scene-shell` while an immediate `keydown Space` plus a short wait still left the readout at `13% across · grounded`
+  - the same Preview shell continued to respond on the held-input path that had already produced `airborne`
+
 Observed subagent errors:
 
 - `429 Too Many Requests`
@@ -77,6 +93,8 @@ Successful delegated reruns on 2026-03-30 after the fix pass:
 - the issue list is documented
 - delegated execution evidence now exists for the repaired Preview gating and character-card truthfulness paths
 - delegated evidence now also exists for the retry-state path on a real library card after a forced character-load failure
+- delegated evidence now exists for live Preview interaction, but only when the test method uses held-key input instead of a tap-style key press
+- the first-keyboard-event path immediately after opening Preview is still not fully pinned down by browser automation evidence
 
 ## Required Next Step
 
