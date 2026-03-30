@@ -19,13 +19,6 @@
                 <span class="brand-sprite">Sprite</span>
               </span>
             </a>
-
-            <nav class="nav-links nav-links-desktop">
-              <a href="#stage-character">Character</a>
-              <a href="#stage-animate">Animate</a>
-              <a href="#stage-preview">Preview</a>
-              <a href="#stage-spritesheets">Spritesheets</a>
-            </nav>
           </div>
 
           <div class="nav-right-cluster">
@@ -113,6 +106,7 @@
               </div>
 
               <div id="workspace-action-buttons" class="project-action-row"></div>
+              <p id="workspace-status-message" class="message" role="status"></p>
             </div>
 
             <div class="project-visual">
@@ -455,6 +449,18 @@
                     </div>
                   </div>
                   <p id="preview-action-message" class="message" role="status"></p>
+                  <section id="preview-empty-state" class="preview-empty-state hidden">
+                    <div class="preview-empty-state__copy">
+                      <p class="eyebrow">Preview unavailable</p>
+                      <h3>Preview stays locked</h3>
+                      <p class="muted">Generate the first motion in Animate to unlock Preview.</p>
+                    </div>
+                    <div class="result-card__links">
+                      <button class="btn btn-secondary" type="button" data-workspace-stage="animate">
+                        Open Animate
+                      </button>
+                    </div>
+                  </section>
 
                   <div class="preview-deck">
                     <section class="preview-stageboard">
@@ -626,6 +632,7 @@
       </main>
     </div>
 
+    <script src="/workspace-state.js" defer></script>
     <script src="/preview-runtime.js" defer></script>
     <script src="/app.js" defer></script>
   </body>

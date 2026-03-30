@@ -1,0 +1,39 @@
+{
+  "checkedAt": "2026-03-30T08:34:59.250Z",
+  "url": "http://127.0.0.1:3124/",
+  "target": {
+    "name": "Failure Probe Temp 2",
+    "id": "char_mxhkiop1lt",
+    "jsonFile": "/tmp/autosprite-failure-probe/runtime/data/characters/char_mxhkiop1lt.json"
+  },
+  "evidenceFiles": {
+    "resultPath": "/Users/atou/agents-in-discord/workspaces/1486672597298184282/output/evidence/character-delete-retry-probe-char_mxhkiop1lt.json",
+    "beforePng": "/Users/atou/agents-in-discord/workspaces/1486672597298184282/output/evidence/character-delete-retry-probe-char_mxhkiop1lt-before.png",
+    "afterPng": "/Users/atou/agents-in-discord/workspaces/1486672597298184282/output/evidence/character-delete-retry-probe-char_mxhkiop1lt-after.png"
+  },
+  "steps": {
+    "openPage": {
+      "ok": true,
+      "status": 200
+    },
+    "cardVisibleBeforeDelete": {
+      "ok": true,
+      "nameCount": 2,
+      "idSeenInPageText": false
+    },
+    "deleteJson": {
+      "ok": true
+    },
+    "afterClick": {
+      "failureMessageDetected": true,
+      "failureMatches": [
+        "/error/i",
+        "/not found/i"
+      ],
+      "retryDetected": true,
+      "retryCount": 1,
+      "retryCnCount": 0
+    }
+  },
+  "verdict": "PASS"
+}

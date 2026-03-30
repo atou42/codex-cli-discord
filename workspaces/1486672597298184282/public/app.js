@@ -29,6 +29,18 @@ const {
   resolvePreviewRuntimeAction,
   isOneShotPreviewAction,
 } = previewRuntimeApi;
+const workspaceStateApi = window.AutoSpriteWorkspaceState;
+if (!workspaceStateApi) {
+  throw new Error("Workspace state helpers failed to load.");
+}
+const {
+  deriveWorkspaceSummary,
+  isStageAccessible: deriveStageAccessibility,
+  getPreviewStageCopy,
+  getCharacterCardState,
+  getCurrentResultState,
+  getAnimateMotionState,
+} = workspaceStateApi;
 const TOKEN_STORAGE_KEY = "autosprite.netaToken";
 const PREVIEW_SCENES = [
   {
@@ -120,6 +132,8 @@ const state = {
   netaUser: null,
   characters: [],
   selectedCharacterId: null,
+  selectingCharacterId: null,
+  characterLoadErrorId: null,
   selectedCharacter: null,
   supportedActions: [],
   poses: [],
@@ -179,6 +193,8 @@ const state = {
   exportsActionError: false,
   selectingSpritesheetId: null,
   redoingSpritesheetId: null,
+  workspaceStatusMessage: "",
+  workspaceStatusError: false,
   pollTimer: null,
   previewTimer: null,
 };
@@ -194,6 +210,7 @@ const elements = {
   characterList: document.querySelector("#character-list"),
   workspaceTitle: document.querySelector("#workspace-title"),
   workspaceSubtitle: document.querySelector("#workspace-subtitle"),
+  workspaceStatusMessage: document.querySelector("#workspace-status-message"),
   currentStageLabel: document.querySelector("#current-stage-label"),
   currentQueueLabel: document.querySelector("#current-queue-label"),
   nextStepLabel: document.querySelector("#next-step-label"),
@@ -247,6 +264,10 @@ const elements = {
   previewCompareMeta: document.querySelector("#preview-compare-meta"),
   previewCompareSwitcher: document.querySelector("#preview-compare-switcher"),
   previewActionMessage: document.querySelector("#preview-action-message"),
+  previewEmptyState: document.querySelector("#preview-empty-state"),
+  previewDeck: document.querySelector(".preview-deck"),
+  previewTimeline: document.querySelector(".preview-timeline"),
+  previewWorkspaceActions: document.querySelector(".preview-workspace__actions"),
   previewPlayToggle: document.querySelector("#preview-play-toggle"),
   previewPlayToggleSecondary: document.querySelector("#preview-play-toggle-secondary"),
   previewSelectVersion: document.querySelector("#preview-select-version"),
@@ -353,6 +374,63 @@ function getPrimarySpritesheet() {
   return state.spritesheets.find((sheet) => sheet.isSelectedVersion) || state.spritesheets[0] || null;
 }
 
+function getWorkspaceSummary() {
+  if (!state.selectedCharacter) {
+    return deriveWorkspaceSummary();
+  }
+
+  return deriveWorkspaceSummary({
+    jobs: state.jobs,
+    spritesheets: state.spritesheets,
+  });
+}
+
+function getCharacterWorkspaceSummary(character) {
+  return character?.workspaceSummary || deriveWorkspaceSummary();
+}
+
+function syncSelectedCharacterWorkspaceSummary() {
+  if (!state.selectedCharacterId) {
+    return;
+  }
+
+  const workspaceSummary = deriveWorkspaceSummary({
+    jobs: state.jobs,
+    spritesheets: state.spritesheets,
+  });
+
+  if (state.selectedCharacter) {
+    state.selectedCharacter = {
+      ...state.selectedCharacter,
+      workspaceSummary,
+    };
+  }
+
+  state.characters = state.characters.map((character) =>
+    character.id === state.selectedCharacterId
+      ? {
+          ...character,
+          workspaceSummary,
+        }
+      : character,
+  );
+}
+
+function setWorkspaceStatusMessage(message, isError = false) {
+  state.workspaceStatusMessage = message;
+  state.workspaceStatusError = isError;
+  if (!elements.workspaceStatusMessage) {
+    return;
+  }
+
+  elements.workspaceStatusMessage.textContent = message;
+  elements.workspaceStatusMessage.style.color = isError ? "var(--color-danger)" : "var(--color-muted)";
+}
+
+function clearWorkspaceStatusMessage() {
+  setWorkspaceStatusMessage("");
+}
+
 function getSelectedVersionChipMarkup(sheet) {
   if (!sheet?.isSelectedVersion) {
     return "";
@@ -395,6 +473,28 @@ function clearActionMessages() {
   state.previewActionError = false;
   state.exportsActionError = false;
   renderActionMessages();
+}
+
+function getMotionJobs(motionKey) {
+  if (!motionKey) {
+    return [];
+  }
+
+  const actionId = motionKey.startsWith("standard:") ? motionKey.slice("standard:".length) : null;
+  const customAnimationId = motionKey.startsWith("custom:") ? motionKey.slice("custom:".length) : null;
+
+  return state.jobs.filter((job) => {
+    const request = job?.request || {};
+    if (motionKey.startsWith("standard:")) {
+      return request.requestKind !== "custom" && request.action === actionId;
+    }
+
+    if (motionKey.startsWith("custom:")) {
+      return request.requestKind === "custom" && request.customAnimationId === customAnimationId;
+    }
+
+    return false;
+  });
 }
 
 function getCharacterExportUrl() {
@@ -999,23 +1099,10 @@ function pruneSelections() {
 }
 
 function stageIsAccessible(stage) {
-  if (stage === "character") {
-    return true;
-  }
-
-  if (stage === "animate") {
-    return Boolean(state.selectedCharacter);
-  }
-
-  if (stage === "preview") {
-    return Boolean(state.selectedCharacter) && (state.jobs.length > 0 || state.spritesheets.length > 0);
-  }
-
-  if (stage === "spritesheets") {
-    return state.spritesheets.length > 0;
-  }
-
-  return false;
+  return deriveStageAccessibility(stage, {
+    hasSelectedCharacter: Boolean(state.selectedCharacter),
+    workspaceSummary: getWorkspaceSummary(),
+  });
 }
 
 function getQueueLabel() {
@@ -1039,6 +1126,7 @@ function getQueueLabel() {
 }
 
 function getNextStepLabel() {
+  const workspaceSummary = getWorkspaceSummary();
   if (!state.selectedCharacter) {
     return "Upload or generate a base character";
   }
@@ -1052,13 +1140,14 @@ function getNextStepLabel() {
   }
 
   if (state.currentStage === "preview") {
-    return state.spritesheets.length > 0 ? "Open exports" : "Wait for render";
+    return getPreviewStageCopy({ workspaceSummary }).nextStepLabel;
   }
 
   return "Download files";
 }
 
 function getStageSubtitle() {
+  const workspaceSummary = getWorkspaceSummary();
   if (!state.selectedCharacter) {
     return "Upload or generate one character, choose the motions, preview the result, and export production-ready sheets.";
   }
@@ -1072,9 +1161,7 @@ function getStageSubtitle() {
   }
 
   if (state.currentStage === "preview") {
-    return state.spritesheets.length > 0
-      ? "Inspect the motion, tighten the loop range, and check playback speed before export."
-      : "Preview will unlock automatically as soon as the first spritesheet finishes.";
+    return getPreviewStageCopy({ workspaceSummary }).subtitle;
   }
 
   return "Download the PNG spritesheet and JSON atlas for each finished motion.";
@@ -1212,6 +1299,7 @@ function renderAuthState() {
 function renderWorkspaceHeader() {
   elements.workspaceTitle.textContent = state.selectedCharacter ? state.selectedCharacter.name : "Create a character to begin.";
   elements.workspaceSubtitle.textContent = getStageSubtitle();
+  setWorkspaceStatusMessage(state.workspaceStatusMessage, state.workspaceStatusError);
 
   if (elements.currentStageLabel) {
     elements.currentStageLabel.textContent = STAGE_LABELS[state.currentStage];
@@ -1259,7 +1347,14 @@ function renderWorkspaceActionDeck() {
   }
 
   const primarySheet = getPrimarySpritesheet();
-  const previewLabel = primarySheet ? `${primarySheet.name} · ${formatVersionLabel(primarySheet)}` : "No render yet";
+  const workspaceSummary = getWorkspaceSummary();
+  const previewLabel = primarySheet
+    ? `${primarySheet.name} · ${formatVersionLabel(primarySheet)}`
+    : workspaceSummary.failedJobCount > 0
+      ? "Last render failed"
+      : workspaceSummary.activeJobCount > 0
+        ? "Waiting for first render"
+        : "No render yet";
 
   elements.workspaceActionButtons.innerHTML = `
     <button
@@ -1314,17 +1409,18 @@ function renderWorkspaceCurrentResultCard() {
   }
 
   const primarySheet = getPrimarySpritesheet();
+  const workspaceSummary = getWorkspaceSummary();
+  const currentResultState = getCurrentResultState({
+    workspaceSummary,
+    primarySheet,
+  });
   if (!primarySheet) {
     elements.workspaceCurrentResult.innerHTML = `
       <p class="eyebrow">Current result</p>
-      <h3>${activeJobCount() > 0 ? "Render in progress" : "No motion rendered yet"}</h3>
-      <p class="muted">${
-        activeJobCount() > 0
-          ? "A queued job is still running. The first completed sheet will appear here automatically."
-          : "Open Animate and generate the first walk cycle for this character."
-      }</p>
+      <h3>${escapeHtml(currentResultState.title)}</h3>
+      <p class="muted">${escapeHtml(currentResultState.description)}</p>
       <div class="result-card__links">
-        <button class="btn btn-secondary" type="button" data-workspace-stage="animate">Open Animate</button>
+        <button class="btn btn-secondary" type="button" data-workspace-stage="animate">${escapeHtml(currentResultState.primaryAction)}</button>
       </div>
     `;
     return;
@@ -1371,12 +1467,20 @@ function renderCharacters() {
     .map((character) => {
       const notes = character.analysis?.notes?.length ? `<p class="muted">${escapeHtml(character.analysis.notes[0])}</p>` : "";
       const isSelected = character.id === state.selectedCharacterId;
+      const isLoading = character.id === state.selectingCharacterId;
+      const hasLoadError = character.id === state.characterLoadErrorId;
+      const cardState = getCharacterCardState({
+        workspaceSummary: getCharacterWorkspaceSummary(character),
+        isSelected,
+        isLoading,
+        hasLoadError,
+      });
       const sourceLabel = `${getCharacterSourceLabel(character)} · ${formatShortDate(character.updatedAt || character.createdAt)}`;
       return `
         <article class="character-card ${isSelected ? "is-selected" : ""}" data-character-id="${escapeHtml(character.id)}">
           <div class="character-card__top">
             <img class="character-card__thumbnail" src="${escapeHtml(character.thumbnailUrl || character.baseImageUrl)}" alt="${escapeHtml(character.name)}" />
-            <span class="${statusClass("succeeded")}">ready</span>
+            <span class="${statusClass(cardState.badgeStatus)}">${escapeHtml(cardState.badgeLabel)}</span>
           </div>
           <div class="character-card__row">
             <div>
@@ -1386,7 +1490,7 @@ function renderCharacters() {
           </div>
           <div class="character-card__footer">
             <span class="character-card__meta">${escapeHtml(sourceLabel)}</span>
-            <span class="character-card__state">${isSelected ? "Loaded" : "Open"}</span>
+            <span class="character-card__state">${escapeHtml(cardState.stateLabel)}</span>
           </div>
           ${notes}
         </article>
@@ -1738,16 +1842,17 @@ function renderAnimateConsequencePanel() {
   }
 
   if (!targetSheet) {
+    const motionState = getAnimateMotionState({
+      motionKey: target.motionKey,
+      jobs: getMotionJobs(target.motionKey),
+      spritesheets: state.spritesheets,
+    });
     elements.animatePreviewMeta.innerHTML = `
-      <p class="eyebrow">Pending result</p>
+      <p class="eyebrow">${escapeHtml(motionState.title)}</p>
       <h3>${escapeHtml(getAnimateMotionLabel(target.motionKey))}</h3>
-      <p class="muted">${
-        targetPrompt
-          ? escapeHtml(targetPrompt)
-          : "No current sheet exists for this motion yet. Generate the batch and the result will land here."
-      }</p>
+      <p class="muted">${escapeHtml(motionState.description || targetPrompt || "No current sheet exists for this motion yet. Generate the batch and the result will land here.")}</p>
       <div class="preview-meta__facts">
-        <span>Waiting for first render</span>
+        <span>${escapeHtml(motionState.factLabel)}</span>
         <span>${escapeHtml(`${pluralize(getAnimateMotionSheets(target.motionKey).length, "saved version")}`)}</span>
       </div>
     `;
@@ -1938,10 +2043,10 @@ function renderPreviewPickers() {
   }
 
   if (state.spritesheets.length === 0) {
-    const message =
-      activeJobCount() > 0
-        ? "The first completed render will appear here automatically."
-        : "No completed renders yet. Generate a batch on the Animate stage.";
+    const workspaceSummary = getWorkspaceSummary();
+    const previewCopy = getPreviewStageCopy({ workspaceSummary });
+    const currentResultState = getCurrentResultState({ workspaceSummary });
+    const message = currentResultState.kind === "failed" ? currentResultState.description : previewCopy.subtitle;
     elements.previewResultList.innerHTML = `<p class="muted">${message}</p>`;
     return;
   }
@@ -2127,6 +2232,42 @@ function renderPreviewControls() {
   renderActionMessages();
 }
 
+function renderPreviewAvailabilityState() {
+  if (!elements.previewEmptyState || !elements.previewDeck || !elements.previewTimeline || !elements.previewWorkspaceActions) {
+    return;
+  }
+
+  const hasPreview = Boolean(state.activePreview && state.previewAtlas && state.previewSheetImage);
+  elements.previewEmptyState.classList.toggle("hidden", hasPreview);
+  elements.previewDeck.classList.toggle("hidden", !hasPreview);
+  elements.previewTimeline.classList.toggle("hidden", !hasPreview);
+  elements.previewWorkspaceActions.classList.toggle("hidden", !hasPreview);
+
+  if (hasPreview) {
+    return;
+  }
+
+  const workspaceSummary = getWorkspaceSummary();
+  const previewCopy = getPreviewStageCopy({ workspaceSummary });
+  const currentResultState = getCurrentResultState({ workspaceSummary });
+  const leadMessage =
+    currentResultState.kind === "failed" ? currentResultState.description : previewCopy.subtitle;
+  const followupMessage = currentResultState.kind === "failed" ? previewCopy.subtitle : "";
+  const buttonLabel = currentResultState.primaryAction || "Open Animate";
+
+  elements.previewEmptyState.innerHTML = `
+    <div class="preview-empty-state__copy">
+      <p class="eyebrow">Preview unavailable</p>
+      <h3>${escapeHtml(previewCopy.title)}</h3>
+      <p class="muted">${escapeHtml(leadMessage)}</p>
+      ${followupMessage ? `<p class="muted">${escapeHtml(followupMessage)}</p>` : ""}
+    </div>
+    <div class="result-card__links">
+      <button class="btn btn-secondary" type="button" data-workspace-stage="animate">${escapeHtml(buttonLabel)}</button>
+    </div>
+  `;
+}
+
 function renderStageShell() {
   ensureAccessibleStage();
   renderWorkspaceHeader();
@@ -2155,6 +2296,7 @@ function renderStageShell() {
   renderAnimateConsequencePanel();
   renderPreviewComparePanel();
   renderPreviewControls();
+  renderPreviewAvailabilityState();
 
   if (state.currentStage === "preview" && state.spritesheets.length > 0 && !state.activePreview) {
     void loadPreview(state.spritesheets[0].id);
@@ -2252,45 +2394,87 @@ async function loadSupportedActions() {
 }
 
 async function selectCharacter(characterId, { preferredStage = "character" } = {}) {
-  state.selectedCharacterId = characterId;
-  state.selectedCharacter = await fetchJson(`/api/characters/${characterId}`);
-  state.poses = [];
-  state.customAnimations = [];
-  state.spritesheets = [];
-  state.jobs = [];
-  state.selectedStandardActionIds = state.supportedActions.some((action) => action.id === "walk") ? ["walk"] : [];
-  state.selectedCustomActionIds = [];
-  state.pendingPreview = null;
-  resetPreview("Loading current character results...");
-  clearBuildMessages();
-  clearActionMessages();
-
-  renderAnalysisCard(state.selectedCharacter);
-  renderWorkspaceSummary();
+  const clickedCharacter = state.characters.find((character) => character.id === characterId) || null;
+  state.selectingCharacterId = characterId;
+  state.characterLoadErrorId = null;
+  clearWorkspaceStatusMessage();
   renderCharacters();
-  renderPoses();
-  renderCustomAnimations();
-  renderAllJobLists();
-  renderPreviewPickers();
-  renderSpritesheets();
-  renderActionMessages();
-  renderActionList();
 
-  await Promise.all([
-    loadPoses(characterId),
-    loadCustomAnimations(characterId),
-    loadSpritesheets(characterId),
-    loadJobs(characterId),
-  ]);
+  try {
+    const [character, posesPayload, customAnimationsPayload, spritesheetsPayload, jobsPayload] = await Promise.all([
+      fetchJson(`/api/characters/${characterId}`),
+      fetchJson(`/api/characters/${characterId}/poses`),
+      fetchJson(`/api/characters/${characterId}/custom-animations`),
+      fetchJson(`/api/characters/${characterId}/spritesheets`),
+      fetchJson(`/api/jobs?characterId=${encodeURIComponent(characterId)}`),
+    ]);
 
-  renderActionList();
-  setAnimatePanel("select");
-  setStage(preferredStage, { force: true });
+    state.selectedCharacterId = characterId;
+    state.selectedCharacter = character;
+    state.poses = posesPayload.poses;
+    state.customAnimations = customAnimationsPayload.customAnimations;
+    state.spritesheets = spritesheetsPayload.spritesheets;
+    state.jobs = jobsPayload.jobs;
+    state.selectedStandardActionIds = state.supportedActions.some((action) => action.id === "walk") ? ["walk"] : [];
+    state.selectedCustomActionIds = [];
+    state.pendingPreview = null;
+    state.selectingCharacterId = null;
+    state.characterLoadErrorId = null;
+    clearBuildMessages();
+    clearActionMessages();
+    clearWorkspaceStatusMessage();
 
-  if (activeJobCount() > 0) {
-    startPolling();
-  } else {
-    stopPolling();
+    const workspaceSummary = deriveWorkspaceSummary({
+      jobs: state.jobs,
+      spritesheets: state.spritesheets,
+    });
+    state.characters = state.characters.map((item) =>
+      item.id === characterId
+        ? {
+            ...item,
+            ...character,
+            workspaceSummary,
+          }
+        : item,
+    );
+
+    rebuildPreviewRuntimeCatalog();
+    resetPreview(getPreviewStageCopy({ workspaceSummary }).subtitle);
+    renderAnalysisCard(state.selectedCharacter);
+    renderWorkspaceSummary();
+    renderCharacters();
+    renderPoses();
+    renderCustomAnimations();
+    renderAllJobLists();
+    renderPreviewPickers();
+    renderSpritesheets();
+    renderActionMessages();
+    renderActionList();
+    updateCustomPoseOptions();
+    updateCustomFormState();
+
+    if (state.spritesheets.length > 0) {
+      await loadPreview(state.spritesheets[0].id);
+    }
+
+    renderActionList();
+    setAnimatePanel("select");
+    setStage(preferredStage, { force: true });
+
+    if (activeJobCount() > 0) {
+      startPolling();
+    } else {
+      stopPolling();
+    }
+  } catch (error) {
+    state.selectingCharacterId = null;
+    state.characterLoadErrorId = characterId;
+    renderCharacters();
+    renderWorkspaceHeader();
+    setWorkspaceStatusMessage(
+      `Could not load ${clickedCharacter?.name || "that character"}. ${error.message}`,
+      true,
+    );
   }
 }
 
@@ -2320,7 +2504,9 @@ async function loadSpritesheets(characterId) {
       state.activePreview = { ...state.activePreview, ...refreshedActivePreview };
     }
   }
+  syncSelectedCharacterWorkspaceSummary();
   rebuildPreviewRuntimeCatalog();
+  renderCharacters();
   renderPreviewPickers();
   renderSpritesheets();
   renderWorkspaceSummary();
@@ -2328,7 +2514,7 @@ async function loadSpritesheets(characterId) {
   renderAnimateConsequencePanel();
 
   if (state.spritesheets.length === 0) {
-    resetPreview(activeJobCount() > 0 ? "Waiting for the first generated result." : "No generated result yet.");
+    resetPreview(getPreviewStageCopy({ workspaceSummary: getWorkspaceSummary() }).subtitle);
     return;
   }
 
@@ -2368,6 +2554,8 @@ async function loadJobs(characterId) {
     }
   }
 
+  syncSelectedCharacterWorkspaceSummary();
+  renderCharacters();
   renderAllJobLists();
   renderWorkspaceHeader();
   renderPreviewPickers();
@@ -2951,6 +3139,7 @@ function resetPreview(message = "No generated result yet.") {
   renderPreviewComparePanel();
   renderPreviewControls();
   renderPreviewPickers();
+  renderPreviewAvailabilityState();
 }
 
 function startPreviewLoop() {
@@ -3050,6 +3239,7 @@ async function loadPreview(spritesheetId) {
 
     renderPreviewSceneButtons();
     renderPreviewPickers();
+    renderPreviewAvailabilityState();
     focusPreviewSceneShell();
     drawCurrentPreviewFrame();
     startPreviewLoop();
