@@ -137,3 +137,11 @@ Support:
 - `npm test`
 - desktop browser smoke check
 - mobile browser smoke check
+
+## Current Status Snapshot
+
+- staged shell is in place across Character, Animate, Preview, and Spritesheets
+- Animate now includes a consequence panel that shows queue impact and any current result for the selected motion
+- Preview now has runtime inspection, version compare, redo, and explicit export approval
+- exports still ship PNG, atlas, and full character pack downloads
+- remaining non-free-path gaps stay out of scope for this plan

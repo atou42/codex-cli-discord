@@ -111,6 +111,8 @@
                   <strong id="stat-exports">0</strong>
                 </article>
               </div>
+
+              <div id="workspace-action-buttons" class="project-action-row"></div>
             </div>
 
             <div class="project-visual">
@@ -137,6 +139,8 @@
                   <strong id="next-step-label">Upload a base character</strong>
                 </div>
               </div>
+
+              <div id="workspace-current-result" class="workspace-result-card"></div>
 
               <div id="analysis-card" class="analysis-card hidden"></div>
             </div>
@@ -200,7 +204,7 @@
                 <section class="panel panel--wide surface">
                   <div class="panel__header">
                     <p class="eyebrow">New Character</p>
-                    <h2>Upload and name</h2>
+                    <h2>Upload or generate</h2>
                   </div>
 
                   <form id="create-character-form" class="stack">
@@ -215,14 +219,26 @@
                     </label>
 
                     <label class="field">
+                      <span>Character prompt</span>
+                      <textarea
+                        id="character-prompt"
+                        name="prompt"
+                        rows="3"
+                        placeholder="example: retro pixel RPG heroine, full body, side view facing right, standing idle pose"
+                      ></textarea>
+                    </label>
+
+                    <label class="field">
                       <span>Character image</span>
-                      <input id="character-image" name="image" type="file" accept="image/png,image/jpeg,image/webp" required />
+                      <input id="character-image" name="image" type="file" accept="image/png,image/jpeg,image/webp" />
                     </label>
 
                     <label class="toggle">
                       <input id="is-humanoid" name="isHumanoid" type="checkbox" checked />
                       <span>Prefer humanoid motion</span>
                     </label>
+
+                    <p class="muted">This flow is tuned for pixel-style side-view sprite sheets for side-scrolling games. Upload an image, or fill the prompt and connect a Neta token to generate one.</p>
 
                     <button class="button button--primary" type="submit">Create character</button>
                   </form>
@@ -235,16 +251,23 @@
             <section id="stage-animate" class="stage-panel hidden" data-stage-panel="animate">
               <div class="stage-heading">
                 <p class="eyebrow">Animate</p>
-                <h2>Choose the motion pack</h2>
-                <p class="muted">Pick the standard motions for this batch or branch into pose and custom action setup when the character needs it.</p>
+                <h2>Build the first long walk cycle</h2>
+                <p class="muted">Start with one long side-view walk sheet for a side-scrolling game. Pose and custom action controls stay here for later passes.</p>
               </div>
 
               <div class="animate-stage-layout">
                 <section class="panel panel--wide surface">
                   <div class="animate-subtabs" id="animate-tabs">
-                    <button class="animate-subtab" type="button" data-animate-panel="select">Select motions</button>
-                    <button class="animate-subtab" type="button" data-animate-panel="pose">Create pose</button>
-                    <button class="animate-subtab" type="button" data-animate-panel="custom">Custom action</button>
+                    <button class="animate-subtab animate-subtab--primary" type="button" data-animate-panel="select">
+                      Select motions
+                    </button>
+                    <div class="animate-subtabs__lab">
+                      <span class="eyebrow">Motion lab</span>
+                      <div class="animate-subtabs__lab-actions">
+                        <button class="animate-subtab" type="button" data-animate-panel="pose">Create pose</button>
+                        <button class="animate-subtab" type="button" data-animate-panel="custom">Custom action</button>
+                      </div>
+                    </div>
                   </div>
 
                   <section id="animate-panel-select" class="animate-panel">
@@ -252,7 +275,7 @@
                       <div class="generate-main">
                         <div class="section-title">
                           <strong>Standard and custom motions</strong>
-                          <span class="muted">Pick up to five motions for the next render batch.</span>
+                          <span class="muted">The main path is one long walk cycle first. Extra motions can come after the base sheet looks right.</span>
                         </div>
 
                         <div id="action-list" class="action-list action-list--tiles"></div>
@@ -353,6 +376,27 @@
                 </section>
 
                 <aside class="stage-side-column">
+                  <section class="panel panel--wide surface animate-inspector">
+                    <div class="panel__header">
+                      <p class="eyebrow">Selection Consequence</p>
+                      <h2>See the batch before you run it</h2>
+                    </div>
+                    <div id="animate-consequence-summary" class="animate-consequence-summary">
+                      <p class="muted">Choose motions to see queue impact and any current result for that motion.</p>
+                    </div>
+                    <div id="animate-selection-chips" class="animate-selection-chips"></div>
+                    <div class="animate-preview-shell">
+                      <img id="animate-preview-character" class="animate-preview-character hidden" alt="" />
+                      <canvas id="animate-preview-canvas" class="hidden" width="320" height="400"></canvas>
+                    </div>
+                    <div id="animate-preview-meta" class="animate-preview-meta">
+                      <p class="muted">No motion selected yet.</p>
+                    </div>
+                    <button id="animate-open-preview" class="btn btn-secondary" type="button" disabled>
+                      Open current result
+                    </button>
+                  </section>
+
                   <section class="panel panel--wide surface">
                     <div class="panel__header">
                       <p class="eyebrow">Queue</p>
@@ -392,40 +436,156 @@
                       <p class="muted">No generated result yet.</p>
                     </div>
 
-                    <button id="preview-to-exports" class="btn btn-secondary" type="button">
-                      Open spritesheets
-                    </button>
+                    <div class="preview-workspace__actions">
+                      <button id="preview-select-version" class="btn" type="button">
+                        Approve for export
+                      </button>
+                      <button id="preview-redo-motion" class="btn btn-secondary" type="button">
+                        Redo motion
+                      </button>
+                      <button id="preview-play-toggle" class="btn btn-secondary" type="button">
+                        Pause loop
+                      </button>
+                      <button id="preview-download-package" class="btn btn-secondary" type="button">
+                        Download character pack
+                      </button>
+                      <button id="preview-to-exports" class="btn btn-secondary" type="button">
+                        Open spritesheets
+                      </button>
+                    </div>
+                  </div>
+                  <p id="preview-action-message" class="message" role="status"></p>
+
+                  <div class="preview-deck">
+                    <section class="preview-stageboard">
+                      <div class="preview-pane-head">
+                        <div>
+                          <p class="eyebrow">Runtime Stage</p>
+                          <h3>See the motion in context</h3>
+                        </div>
+                        <div class="preview-scene-toolbar">
+                          <p class="preview-control-hint">WASD or arrows move. Space jumps. Shift runs. C crouches. J attacks. H reacts.</p>
+                          <div id="preview-scene-picker" class="preview-scene-picker"></div>
+                        </div>
+                      </div>
+
+                      <div id="preview-scene-shell" class="preview-scene-shell" tabindex="0">
+                        <canvas id="preview-scene-canvas" width="960" height="540"></canvas>
+                        <div class="preview-scene-caption">
+                          <div class="preview-scene-caption__item">
+                            <span>Scene</span>
+                            <strong id="preview-scene-readout">Awaiting a generated result</strong>
+                          </div>
+                          <div class="preview-scene-caption__item">
+                            <span>Motion</span>
+                            <strong id="preview-motion-readout">No preview loaded</strong>
+                          </div>
+                          <div class="preview-scene-caption__item">
+                            <span>Avatar</span>
+                            <strong id="preview-position-readout">Waiting on input</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                    <aside class="preview-inspector">
+                      <section class="preview-pane preview-pane--compare">
+                        <div class="preview-pane-head">
+                          <div>
+                            <p class="eyebrow">Version Compare</p>
+                            <h3>See the same frame side by side</h3>
+                          </div>
+                          <div id="preview-compare-switcher" class="preview-compare-switcher"></div>
+                        </div>
+
+                        <div class="preview-compare-grid">
+                          <article class="preview-compare-card">
+                            <div id="preview-primary-meta" class="preview-compare-meta">
+                              <p class="muted">No focus version loaded.</p>
+                            </div>
+                            <div class="preview-detail-shell preview-detail-shell--compare">
+                              <canvas id="preview-canvas" width="320" height="400"></canvas>
+                            </div>
+                          </article>
+
+                          <article class="preview-compare-card">
+                            <div id="preview-compare-meta" class="preview-compare-meta">
+                              <p class="muted">Redo a motion to unlock comparison.</p>
+                            </div>
+                            <div class="preview-detail-shell preview-detail-shell--compare preview-detail-shell--secondary">
+                              <canvas id="preview-compare-canvas" width="320" height="400"></canvas>
+                            </div>
+                          </article>
+                        </div>
+                      </section>
+
+                      <section class="preview-pane">
+                        <div class="preview-pane-head">
+                          <div>
+                            <p class="eyebrow">Atlas Map</p>
+                            <h3>Sheet overview</h3>
+                          </div>
+                          <div class="preview-pane-head__pills">
+                            <span id="preview-dimensions-readout" class="preview-inline-pill">Unknown size</span>
+                            <span id="preview-sheet-readout" class="preview-inline-pill">No atlas loaded</span>
+                          </div>
+                        </div>
+
+                        <div class="preview-sheet-shell">
+                          <canvas id="preview-sheet-canvas" width="520" height="320"></canvas>
+                        </div>
+                      </section>
+                    </aside>
                   </div>
 
-                  <div class="preview-player-shell">
-                    <canvas id="preview-canvas" width="256" height="256"></canvas>
-                  </div>
+                  <section class="preview-timeline">
+                    <div class="preview-transport">
+                      <button id="preview-play-toggle-secondary" class="btn btn-secondary" type="button">
+                        Pause
+                      </button>
 
-                  <div class="preview-controls">
-                    <label class="field">
-                      <span>Loop start</span>
-                      <input id="preview-range-start" type="range" min="0" max="0" value="0" />
-                    </label>
-                    <label class="field">
-                      <span>Loop end</span>
-                      <input id="preview-range-end" type="range" min="0" max="0" value="0" />
-                    </label>
-                    <label class="field">
-                      <span>FPS</span>
-                      <input id="preview-fps" type="range" min="4" max="24" value="12" />
-                    </label>
-                  </div>
+                      <div class="preview-transport__scrub">
+                        <div class="preview-transport__labels">
+                          <span>Frame scrub</span>
+                          <strong id="preview-frame-readout">Frame 0 / 0</strong>
+                        </div>
+                        <input id="preview-frame-scrub" type="range" min="0" max="0" value="0" />
+                      </div>
+                    </div>
 
-                  <div class="preview-readout">
-                    <article class="preview-readout__card">
-                      <span>Loop</span>
-                      <strong id="preview-loop-readout">Frames 0 to 0</strong>
-                    </article>
-                    <article class="preview-readout__card">
-                      <span>Speed</span>
-                      <strong id="preview-fps-readout">12 FPS</strong>
-                    </article>
-                  </div>
+                    <div class="preview-controls">
+                      <label class="field">
+                        <span>Loop start</span>
+                        <input id="preview-range-start" type="range" min="0" max="0" value="0" />
+                      </label>
+                      <label class="field">
+                        <span>Loop end</span>
+                        <input id="preview-range-end" type="range" min="0" max="0" value="0" />
+                      </label>
+                      <label class="field">
+                        <span>FPS</span>
+                        <input id="preview-fps" type="range" min="4" max="24" value="12" />
+                      </label>
+                    </div>
+
+                    <div class="preview-readout">
+                      <article class="preview-readout__card">
+                        <span>Loop window</span>
+                        <strong id="preview-loop-readout">Frames 0 to 0</strong>
+                      </article>
+                      <article class="preview-readout__card">
+                        <span>Playback</span>
+                        <strong id="preview-fps-readout">12 FPS</strong>
+                      </article>
+                      <article class="preview-readout__card">
+                        <span>Output</span>
+                        <strong id="preview-output-readout">Unknown export</strong>
+                      </article>
+                      <article class="preview-readout__card">
+                        <span>Atlas</span>
+                        <strong id="preview-atlas-readout">No atlas</strong>
+                      </article>
+                    </div>
+                  </section>
                 </section>
               </div>
             </section>
@@ -439,10 +599,16 @@
 
               <div class="exports-stage-layout">
                 <section class="panel panel--wide surface">
-                  <div class="panel__header">
-                    <p class="eyebrow">Exports</p>
-                    <h2>Generated results</h2>
+                  <div class="panel__header panel__header--split">
+                    <div>
+                      <p class="eyebrow">Exports</p>
+                      <h2>Generated results</h2>
+                    </div>
+                    <button id="exports-download-package" class="btn btn-secondary" type="button">
+                      Download character pack
+                    </button>
                   </div>
+                  <p id="exports-action-message" class="message" role="status"></p>
                   <div id="spritesheet-list" class="spritesheet-list"></div>
                 </section>
 
@@ -460,6 +626,7 @@
       </main>
     </div>
 
+    <script src="/preview-runtime.js" defer></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

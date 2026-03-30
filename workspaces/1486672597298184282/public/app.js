@@ -7,12 +7,112 @@ const STAGE_LABELS = {
 };
 const ACTION_COPY = {
   idle: "Ambient loop with soft breathing and a stable silhouette.",
-  walk: "Readable travel cycle for side-scrolling movement.",
+  walk: "Primary workflow with one long looping cycle for a production sheet.",
   run: "Higher-energy cycle with stronger stretch and lift.",
+  dash: "Short burst with anticipation, drive, and a clean skid finish.",
   jump: "Single arc with takeoff, apex, and landing.",
+  fall: "Air-to-ground drop with a readable brace and impact settle.",
+  crouch: "Low defensive loop that holds up cleanly in side view.",
+  slide: "Grounded evasive move with a long low profile across the lane.",
+  hurt: "One-shot recoil for damage, stagger, or interruption states.",
   attack: "One-shot impact move with a clean finish frame.",
 };
+const previewRuntimeApi = window.AutoSpritePreviewRuntime;
+if (!previewRuntimeApi) {
+  throw new Error("Preview runtime helpers failed to load.");
+}
+const {
+  buildPreviewRuntimeCatalog,
+  pickDefaultPreviewComparisonSheetId,
+  pickAnimateInspectorTarget,
+  mapPreviewComparisonFrameIndex,
+  resolvePreviewRuntimeAction,
+  isOneShotPreviewAction,
+} = previewRuntimeApi;
 const TOKEN_STORAGE_KEY = "autosprite.netaToken";
+const PREVIEW_SCENES = [
+  {
+    id: "meadow",
+    label: "Moss Field",
+    skyTop: "#31465f",
+    skyMid: "#24354a",
+    skyBottom: "#17212d",
+    orbColor: "rgba(216, 161, 93, 0.16)",
+    orbX: 0.18,
+    orbY: 0.22,
+    orbRadius: 0.16,
+    ridgeColor: "rgba(124, 150, 179, 0.18)",
+    hillColor: "rgba(82, 108, 132, 0.3)",
+    groundTop: "#26311f",
+    groundBottom: "#101710",
+    laneColor: "rgba(255, 225, 187, 0.1)",
+    stripColor: "rgba(58, 79, 52, 0.4)",
+    propKind: "shrub",
+    propColor: "rgba(72, 99, 61, 0.42)",
+  },
+  {
+    id: "dunes",
+    label: "Amber Dunes",
+    skyTop: "#694c37",
+    skyMid: "#4c3329",
+    skyBottom: "#20151a",
+    orbColor: "rgba(255, 203, 142, 0.18)",
+    orbX: 0.78,
+    orbY: 0.24,
+    orbRadius: 0.13,
+    ridgeColor: "rgba(205, 148, 102, 0.17)",
+    hillColor: "rgba(133, 96, 67, 0.28)",
+    groundTop: "#5b3f2a",
+    groundBottom: "#21160f",
+    laneColor: "rgba(255, 233, 190, 0.12)",
+    stripColor: "rgba(112, 82, 53, 0.34)",
+    propKind: "cactus",
+    propColor: "rgba(88, 103, 80, 0.36)",
+  },
+  {
+    id: "ruins",
+    label: "Ruined Causeway",
+    skyTop: "#33455a",
+    skyMid: "#253346",
+    skyBottom: "#151c2a",
+    orbColor: "rgba(170, 196, 225, 0.16)",
+    orbX: 0.72,
+    orbY: 0.18,
+    orbRadius: 0.1,
+    ridgeColor: "rgba(113, 133, 156, 0.18)",
+    hillColor: "rgba(66, 82, 102, 0.32)",
+    groundTop: "#3b4341",
+    groundBottom: "#121718",
+    laneColor: "rgba(211, 222, 236, 0.1)",
+    stripColor: "rgba(84, 96, 108, 0.34)",
+    propKind: "pillar",
+    propColor: "rgba(96, 107, 121, 0.4)",
+  },
+  {
+    id: "moonkeep",
+    label: "Moonlit Keep",
+    skyTop: "#2a3148",
+    skyMid: "#171e32",
+    skyBottom: "#0c101b",
+    orbColor: "rgba(215, 230, 255, 0.22)",
+    orbX: 0.22,
+    orbY: 0.16,
+    orbRadius: 0.1,
+    ridgeColor: "rgba(92, 112, 166, 0.17)",
+    hillColor: "rgba(47, 57, 84, 0.34)",
+    groundTop: "#23322a",
+    groundBottom: "#0b100d",
+    laneColor: "rgba(189, 208, 255, 0.08)",
+    stripColor: "rgba(55, 81, 67, 0.3)",
+    propKind: "pine",
+    propColor: "rgba(74, 100, 84, 0.34)",
+  },
+];
+const PREVIEW_SCENE_WORLD_WIDTH = 2400;
+const PREVIEW_SCENE_MOVE_SPEED = 280;
+const PREVIEW_SCENE_VERTICAL_SPEED = 0.24;
+const PREVIEW_SCENE_JUMP_VELOCITY = 560;
+const PREVIEW_SCENE_GRAVITY = 1320;
 
 const state = {
   generationBackend: "unknown",
@@ -30,6 +130,11 @@ const state = {
   currentAnimatePanel: "select",
   selectedStandardActionIds: [],
   selectedCustomActionIds: [],
+  animateFocusedMotionKey: null,
+  animatePreviewSheetId: null,
+  animatePreviewFrameIndex: 0,
+  animatePreviewLastTick: 0,
+  animatePreviewTimer: null,
   pendingPreview: null,
   activePreview: null,
   previewSheetImage: null,
@@ -39,6 +144,41 @@ const state = {
   previewFps: 12,
   previewFrameIndex: 0,
   previewLastTick: 0,
+  previewPaused: false,
+  previewCompareId: null,
+  previewSceneId: null,
+  previewScenePlayerX: 320,
+  previewSceneBaseYRatio: 0.74,
+  previewSceneJumpOffset: 0,
+  previewSceneJumpVelocity: 0,
+  previewSceneFacing: 1,
+  previewSceneKeys: {
+    left: false,
+    right: false,
+    up: false,
+    down: false,
+  },
+  previewSceneModifiers: {
+    sprint: false,
+    crouch: false,
+  },
+  previewRuntimeCatalog: {},
+  previewRuntimeAssets: {},
+  previewRuntimeAssetLoads: {},
+  previewRuntimeActionId: null,
+  previewRuntimeFrameIndex: 0,
+  previewRuntimeLastTick: 0,
+  previewRuntimeCompleted: false,
+  previewRuntimeMode: "idle",
+  previewRuntimePendingActionId: null,
+  previewRuntimeLockedActionId: null,
+  previewRenderLastTick: 0,
+  previewActionMessage: "",
+  exportsActionMessage: "",
+  previewActionError: false,
+  exportsActionError: false,
+  selectingSpritesheetId: null,
+  redoingSpritesheetId: null,
   pollTimer: null,
   previewTimer: null,
 };
@@ -79,6 +219,12 @@ const elements = {
   generateMessage: document.querySelector("#generate-message"),
   generateSummaryTitle: document.querySelector("#generate-summary-title"),
   generateSummaryCopy: document.querySelector("#generate-summary-copy"),
+  animateConsequenceSummary: document.querySelector("#animate-consequence-summary"),
+  animateSelectionChips: document.querySelector("#animate-selection-chips"),
+  animatePreviewCharacter: document.querySelector("#animate-preview-character"),
+  animatePreviewCanvas: document.querySelector("#animate-preview-canvas"),
+  animatePreviewMeta: document.querySelector("#animate-preview-meta"),
+  animateOpenPreview: document.querySelector("#animate-open-preview"),
   jobList: document.querySelector("#job-list"),
   previewJobList: document.querySelector("#preview-job-list"),
   exportsJobList: document.querySelector("#exports-job-list"),
@@ -89,17 +235,53 @@ const elements = {
   statPoses: document.querySelector("#stat-poses"),
   statCustom: document.querySelector("#stat-custom"),
   statExports: document.querySelector("#stat-exports"),
+  workspaceActionButtons: document.querySelector("#workspace-action-buttons"),
+  workspaceCurrentResult: document.querySelector("#workspace-current-result"),
+  previewSceneShell: document.querySelector("#preview-scene-shell"),
+  previewSceneCanvas: document.querySelector("#preview-scene-canvas"),
   previewCanvas: document.querySelector("#preview-canvas"),
+  previewCompareCanvas: document.querySelector("#preview-compare-canvas"),
+  previewSheetCanvas: document.querySelector("#preview-sheet-canvas"),
   previewMeta: document.querySelector("#preview-meta"),
+  previewPrimaryMeta: document.querySelector("#preview-primary-meta"),
+  previewCompareMeta: document.querySelector("#preview-compare-meta"),
+  previewCompareSwitcher: document.querySelector("#preview-compare-switcher"),
+  previewActionMessage: document.querySelector("#preview-action-message"),
+  previewPlayToggle: document.querySelector("#preview-play-toggle"),
+  previewPlayToggleSecondary: document.querySelector("#preview-play-toggle-secondary"),
+  previewSelectVersion: document.querySelector("#preview-select-version"),
+  previewRedoMotion: document.querySelector("#preview-redo-motion"),
+  previewDownloadPackage: document.querySelector("#preview-download-package"),
+  previewScenePicker: document.querySelector("#preview-scene-picker"),
   previewToExports: document.querySelector("#preview-to-exports"),
+  previewFrameScrub: document.querySelector("#preview-frame-scrub"),
   previewRangeStart: document.querySelector("#preview-range-start"),
   previewRangeEnd: document.querySelector("#preview-range-end"),
   previewFps: document.querySelector("#preview-fps"),
+  previewFrameReadout: document.querySelector("#preview-frame-readout"),
   previewLoopReadout: document.querySelector("#preview-loop-readout"),
   previewFpsReadout: document.querySelector("#preview-fps-readout"),
+  previewOutputReadout: document.querySelector("#preview-output-readout"),
+  previewAtlasReadout: document.querySelector("#preview-atlas-readout"),
+  previewDimensionsReadout: document.querySelector("#preview-dimensions-readout"),
+  previewSheetReadout: document.querySelector("#preview-sheet-readout"),
+  previewSceneReadout: document.querySelector("#preview-scene-readout"),
+  previewMotionReadout: document.querySelector("#preview-motion-readout"),
+  previewPositionReadout: document.querySelector("#preview-position-readout"),
+  exportsActionMessage: document.querySelector("#exports-action-message"),
+  exportsDownloadPackage: document.querySelector("#exports-download-package"),
 };
 
+const previewSceneContext = elements.previewSceneCanvas.getContext("2d");
+const animatePreviewContext = elements.animatePreviewCanvas.getContext("2d");
 const previewContext = elements.previewCanvas.getContext("2d");
+const previewCompareContext = elements.previewCompareCanvas.getContext("2d");
+const previewSheetContext = elements.previewSheetCanvas.getContext("2d");
+previewSceneContext.imageSmoothingEnabled = false;
+animatePreviewContext.imageSmoothingEnabled = false;
+previewContext.imageSmoothingEnabled = false;
+previewCompareContext.imageSmoothingEnabled = false;
+previewSheetContext.imageSmoothingEnabled = false;
 
 function statusClass(status) {
   return `status status--${status}`;
@@ -116,6 +298,689 @@ function escapeHtml(value) {
 
 function pluralize(count, word) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+function formatFrameDimensions(sheet) {
+  const width = Number(sheet?.frameWidth || 0);
+  const height = Number(sheet?.frameHeight || 0);
+  if (width > 0 && height > 0) {
+    return `${width}x${height}px`;
+  }
+  if (width > 0) {
+    return `${width}px`;
+  }
+  return "unknown size";
+}
+
+function formatVersionLabel(sheet) {
+  const versionNumber = Number(sheet?.versionNumber || 1);
+  return `V${versionNumber}`;
+}
+
+function formatShortDate(value) {
+  if (!value) {
+    return "Unknown date";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown date";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+function getCharacterSourceLabel(character) {
+  if (!character) {
+    return "Unknown source";
+  }
+
+  if (character.sourceType === "upload") {
+    return "Uploaded art";
+  }
+
+  if (character.sourceType === "generate") {
+    return character.generationBackend === "neta" ? "Generated with Neta" : "Generated art";
+  }
+
+  return "Character source";
+}
+
+function getPrimarySpritesheet() {
+  return state.spritesheets.find((sheet) => sheet.isSelectedVersion) || state.spritesheets[0] || null;
+}
+
+function getSelectedVersionChipMarkup(sheet) {
+  if (!sheet?.isSelectedVersion) {
+    return "";
+  }
+
+  return `<span class="version-chip version-chip--active">Current export</span>`;
+}
+
+function renderActionMessages() {
+  if (elements.previewActionMessage) {
+    elements.previewActionMessage.textContent = state.previewActionMessage;
+    elements.previewActionMessage.style.color = state.previewActionError ? "var(--color-danger)" : "var(--color-muted)";
+  }
+
+  if (elements.exportsActionMessage) {
+    elements.exportsActionMessage.textContent = state.exportsActionMessage;
+    elements.exportsActionMessage.style.color = state.exportsActionError ? "var(--color-danger)" : "var(--color-muted)";
+  }
+}
+
+function setActionMessage(message) {
+  state.previewActionMessage = message;
+  state.exportsActionMessage = message;
+  state.previewActionError = false;
+  state.exportsActionError = false;
+  renderActionMessages();
+}
+
+function setActionError(message) {
+  state.previewActionMessage = message;
+  state.exportsActionMessage = message;
+  state.previewActionError = true;
+  state.exportsActionError = true;
+  renderActionMessages();
+}
+
+function clearActionMessages() {
+  state.previewActionMessage = "";
+  state.exportsActionMessage = "";
+  state.previewActionError = false;
+  state.exportsActionError = false;
+  renderActionMessages();
+}
+
+function getCharacterExportUrl() {
+  if (!state.selectedCharacterId || state.spritesheets.length === 0) {
+    return "";
+  }
+
+  return `/api/characters/${encodeURIComponent(state.selectedCharacterId)}/export-package`;
+}
+
+function triggerCharacterExportDownload() {
+  const exportUrl = getCharacterExportUrl();
+  if (!exportUrl) {
+    return;
+  }
+
+  const anchor = document.createElement("a");
+  anchor.href = exportUrl;
+  anchor.rel = "noopener";
+  anchor.download = "";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function getPreviewFrameCount() {
+  return Array.isArray(state.previewAtlas?.frames) ? state.previewAtlas.frames.length : 0;
+}
+
+function getPreviewLoopBounds() {
+  return {
+    loopStart: Math.min(state.previewLoopStart, state.previewLoopEnd),
+    loopEnd: Math.max(state.previewLoopStart, state.previewLoopEnd),
+  };
+}
+
+function getCurrentPreviewFrame() {
+  if (!state.previewAtlas || !Array.isArray(state.previewAtlas.frames)) {
+    return null;
+  }
+
+  return state.previewAtlas.frames[state.previewFrameIndex] || null;
+}
+
+function getSpritesheetById(spritesheetId) {
+  if (!spritesheetId) {
+    return null;
+  }
+
+  if (state.activePreview?.id === spritesheetId) {
+    return state.activePreview;
+  }
+
+  return state.spritesheets.find((sheet) => sheet.id === spritesheetId) || null;
+}
+
+function getPreviewVersionGroup(sheet = state.activePreview) {
+  if (!sheet?.variantKey) {
+    return [];
+  }
+
+  return state.spritesheets.filter((item) => item.variantKey === sheet.variantKey);
+}
+
+function buildStandardMotionKey(kind) {
+  return kind ? `standard:${kind}` : null;
+}
+
+function buildCustomMotionKey(customAnimationId) {
+  return customAnimationId ? `custom:${customAnimationId}` : null;
+}
+
+function getSelectedAnimateMotionKeys() {
+  return [
+    ...state.selectedStandardActionIds.map((actionId) => buildStandardMotionKey(actionId)),
+    ...state.selectedCustomActionIds.map((customAnimationId) => buildCustomMotionKey(customAnimationId)),
+  ].filter(Boolean);
+}
+
+function getAnimateMotionLabel(motionKey) {
+  if (!motionKey) {
+    return "No motion selected";
+  }
+
+  if (motionKey.startsWith("standard:")) {
+    const actionId = motionKey.slice("standard:".length);
+    const action = state.supportedActions.find((item) => item.id === actionId);
+    return action?.label || actionId;
+  }
+
+  if (motionKey.startsWith("custom:")) {
+    const customAnimationId = motionKey.slice("custom:".length);
+    const animation = state.customAnimations.find((item) => item.id === customAnimationId);
+    return animation?.name || "Custom action";
+  }
+
+  return motionKey;
+}
+
+function getAnimateMotionPrompt(motionKey) {
+  if (!motionKey) {
+    return "";
+  }
+
+  if (motionKey.startsWith("standard:")) {
+    const actionId = motionKey.slice("standard:".length);
+    return ACTION_COPY[actionId] || "";
+  }
+
+  if (motionKey.startsWith("custom:")) {
+    const customAnimationId = motionKey.slice("custom:".length);
+    return state.customAnimations.find((item) => item.id === customAnimationId)?.prompt || "";
+  }
+
+  return "";
+}
+
+function getAnimateMotionSheets(motionKey) {
+  if (!motionKey) {
+    return [];
+  }
+
+  return state.spritesheets.filter((sheet) => {
+    if (!sheet) {
+      return false;
+    }
+
+    if (sheet.variantKey && sheet.variantKey === motionKey) {
+      return true;
+    }
+
+    if (motionKey.startsWith("standard:")) {
+      return sheet.requestKind !== "custom" && sheet.kind === motionKey.slice("standard:".length);
+    }
+
+    if (motionKey.startsWith("custom:")) {
+      return sheet.requestKind === "custom" && sheet.customAnimationId === motionKey.slice("custom:".length);
+    }
+
+    return false;
+  });
+}
+
+function getAnimateInspectorTarget() {
+  return pickAnimateInspectorTarget({
+    selectedStandardActionIds: state.selectedStandardActionIds,
+    selectedCustomActionIds: state.selectedCustomActionIds,
+    spritesheets: state.spritesheets,
+    focusedMotionKey: state.animateFocusedMotionKey,
+  });
+}
+
+function loadImageElement(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load spritesheet image."));
+    image.src = url;
+  });
+}
+
+function buildPreviewAssetRecord(detail, atlas, image) {
+  return {
+    id: detail.id,
+    kind: detail.kind,
+    name: detail.name,
+    detail,
+    atlas,
+    image,
+  };
+}
+
+function cachePreviewRuntimeAsset(detail, atlas, image) {
+  const asset = buildPreviewAssetRecord(detail, atlas, image);
+  state.previewRuntimeAssets[detail.id] = asset;
+  return asset;
+}
+
+async function loadPreviewRuntimeAsset(detail) {
+  if (!detail?.id) {
+    return null;
+  }
+
+  const cachedAsset = state.previewRuntimeAssets[detail.id];
+  if (cachedAsset) {
+    return cachedAsset;
+  }
+
+  if (state.activePreview?.id === detail.id && state.previewSheetImage && state.previewAtlas) {
+    return cachePreviewRuntimeAsset(state.activePreview, state.previewAtlas, state.previewSheetImage);
+  }
+
+  if (!state.previewRuntimeAssetLoads[detail.id]) {
+    state.previewRuntimeAssetLoads[detail.id] = (async () => {
+      try {
+        const atlas = await fetchJson(detail.atlasUrl);
+        const image = await loadImageElement(detail.sheetUrl);
+        return cachePreviewRuntimeAsset(detail, atlas, image);
+      } finally {
+        delete state.previewRuntimeAssetLoads[detail.id];
+      }
+    })();
+  }
+
+  return state.previewRuntimeAssetLoads[detail.id];
+}
+
+function rebuildPreviewRuntimeCatalog() {
+  state.previewRuntimeCatalog = buildPreviewRuntimeCatalog(state.spritesheets);
+}
+
+function getPreviewRuntimeAvailableActionIds() {
+  const actionIds = Object.keys(state.previewRuntimeCatalog);
+  if (state.activePreview?.kind && !actionIds.includes(state.activePreview.kind)) {
+    actionIds.push(state.activePreview.kind);
+  }
+  return actionIds;
+}
+
+function getPreviewRuntimeFallbackActionId() {
+  const availableActionIds = getPreviewRuntimeAvailableActionIds();
+  if (state.previewRuntimeActionId && availableActionIds.includes(state.previewRuntimeActionId)) {
+    return state.previewRuntimeActionId;
+  }
+  if (state.activePreview?.kind && availableActionIds.includes(state.activePreview.kind)) {
+    return state.activePreview.kind;
+  }
+  return availableActionIds[0] || null;
+}
+
+function getPreviewRuntimeSheetSummary(actionId) {
+  if (!actionId) {
+    return null;
+  }
+
+  if (state.previewRuntimeCatalog[actionId]) {
+    return state.previewRuntimeCatalog[actionId];
+  }
+
+  if (state.activePreview?.kind === actionId) {
+    return state.activePreview;
+  }
+
+  return null;
+}
+
+function getPreviewRuntimeAsset(actionId) {
+  const summary = getPreviewRuntimeSheetSummary(actionId);
+  if (!summary) {
+    return null;
+  }
+
+  return state.previewRuntimeAssets[summary.id] || null;
+}
+
+function ensurePreviewRuntimeAsset(actionId) {
+  const summary = getPreviewRuntimeSheetSummary(actionId);
+  if (!summary) {
+    return null;
+  }
+
+  const cachedAsset = state.previewRuntimeAssets[summary.id];
+  if (cachedAsset) {
+    return cachedAsset;
+  }
+
+  void loadPreviewRuntimeAsset(summary)
+    .then(() => {
+      drawCurrentPreviewFrame();
+    })
+    .catch((error) => {
+      console.error(`Failed to load preview runtime asset ${summary.id}`, error);
+    });
+
+  return null;
+}
+
+function primePreviewRuntimeAssets() {
+  for (const actionId of getPreviewRuntimeAvailableActionIds()) {
+    ensurePreviewRuntimeAsset(actionId);
+  }
+}
+
+function syncPreviewCompareId() {
+  if (!state.activePreview?.id) {
+    state.previewCompareId = null;
+    return;
+  }
+
+  const versionGroup = getPreviewVersionGroup(state.activePreview);
+  const currentCompare = getSpritesheetById(state.previewCompareId);
+  const isCurrentCompareValid =
+    currentCompare &&
+    currentCompare.id !== state.activePreview.id &&
+    currentCompare.variantKey === state.activePreview.variantKey;
+
+  if (isCurrentCompareValid) {
+    return;
+  }
+
+  state.previewCompareId = pickDefaultPreviewComparisonSheetId(versionGroup, state.activePreview.id);
+}
+
+function getPreviewCompareSheet() {
+  syncPreviewCompareId();
+  return getSpritesheetById(state.previewCompareId);
+}
+
+function getPreviewCompareAsset() {
+  const compareSheet = getPreviewCompareSheet();
+  if (!compareSheet) {
+    return null;
+  }
+
+  return state.previewRuntimeAssets[compareSheet.id] || null;
+}
+
+function schedulePreviewCompareAssetLoad() {
+  const compareSheet = getPreviewCompareSheet();
+  if (!compareSheet) {
+    return;
+  }
+
+  void loadPreviewRuntimeAsset(compareSheet)
+    .then(() => {
+      renderPreviewComparePanel();
+      drawCurrentPreviewFrame();
+    })
+    .catch((error) => {
+      console.error(`Failed to load compare preview asset ${compareSheet.id}`, error);
+    });
+}
+
+function setPreviewCanvasSize(canvas, width, height) {
+  const safeWidth = Math.max(Math.floor(Number(width) || 0), 1);
+  const safeHeight = Math.max(Math.floor(Number(height) || 0), 1);
+
+  if (canvas.width !== safeWidth) {
+    canvas.width = safeWidth;
+  }
+
+  if (canvas.height !== safeHeight) {
+    canvas.height = safeHeight;
+  }
+}
+
+function drawAssetFrameToCanvas({ canvas, context, detail, atlas, image, frameIndex }) {
+  const width = detail?.frameWidth || 320;
+  const height = detail?.frameHeight || 400;
+  setPreviewCanvasSize(canvas, width, height);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.imageSmoothingEnabled = false;
+
+  const frames = Array.isArray(atlas?.frames) ? atlas.frames : [];
+  if (!image || frames.length === 0) {
+    return null;
+  }
+
+  const safeFrameIndex = clamp(frameIndex, 0, frames.length - 1);
+  const frame = frames[safeFrameIndex];
+  const source = frame?.frame;
+  if (!source) {
+    return null;
+  }
+
+  context.drawImage(image, source.x, source.y, source.w, source.h, 0, 0, canvas.width, canvas.height);
+  return {
+    frame,
+    frameCount: frames.length,
+    frameIndex: safeFrameIndex,
+  };
+}
+
+function buildPreviewCompareFacts(sheet, detailLabel) {
+  const facts = [
+    formatFrameDimensions(sheet),
+    `${sheet.frameCount} frames`,
+    `${sheet.columns} cols · ${sheet.rows} rows`,
+    detailLabel,
+  ];
+
+  return facts.map((value) => `<span>${escapeHtml(value)}</span>`).join("");
+}
+
+function renderPreviewComparePanel() {
+  if (!elements.previewPrimaryMeta || !elements.previewCompareMeta || !elements.previewCompareSwitcher) {
+    return;
+  }
+
+  if (!state.activePreview) {
+    elements.previewPrimaryMeta.innerHTML = `<p class="muted">No focus version loaded.</p>`;
+    elements.previewCompareMeta.innerHTML = `<p class="muted">Redo a motion to unlock comparison.</p>`;
+    elements.previewCompareSwitcher.innerHTML = `<p class="muted">No alternate versions yet.</p>`;
+    return;
+  }
+
+  const orderedVersionGroup = [...getPreviewVersionGroup(state.activePreview)].sort(
+    (left, right) =>
+      Number(right.versionNumber || 0) - Number(left.versionNumber || 0) ||
+      String(right.createdAt || "").localeCompare(String(left.createdAt || "")),
+  );
+  const compareSheet = getPreviewCompareSheet();
+  const compareAsset = getPreviewCompareAsset();
+  const alternateSheets = orderedVersionGroup.filter((sheet) => sheet.id !== state.activePreview.id);
+
+  elements.previewPrimaryMeta.innerHTML = `
+    <div class="preview-compare-meta__top">
+      <div>
+        <p class="eyebrow">Focus version</p>
+        <h4>${escapeHtml(state.activePreview.name)} · ${escapeHtml(formatVersionLabel(state.activePreview))}</h4>
+      </div>
+      <div class="preview-picker__meta">
+        <span class="version-chip">Focus</span>
+        ${getSelectedVersionChipMarkup(state.activePreview)}
+      </div>
+    </div>
+    <p class="muted">This is the frame driving playback, loop tuning, and the stage preview.</p>
+    <div class="preview-meta__facts">
+      ${buildPreviewCompareFacts(
+        state.activePreview,
+        state.activePreview.isSelectedVersion ? "Current export version" : "Preview only",
+      )}
+    </div>
+  `;
+
+  if (alternateSheets.length === 0) {
+    elements.previewCompareSwitcher.innerHTML = `<p class="muted">Redo this motion once to compare versions here.</p>`;
+    elements.previewCompareMeta.innerHTML = `
+      <div class="preview-compare-meta__top">
+        <div>
+          <p class="eyebrow">Compare version</p>
+          <h4>No alternate version yet</h4>
+        </div>
+      </div>
+      <p class="muted">The next redo for this same motion will appear here automatically.</p>
+      <div class="preview-meta__facts">
+        <span>${escapeHtml(formatFrameDimensions(state.activePreview))}</span>
+        <span>Waiting for redo</span>
+      </div>
+    `;
+    return;
+  }
+
+  elements.previewCompareSwitcher.innerHTML = alternateSheets
+    .map((sheet) => {
+      const isActive = compareSheet?.id === sheet.id;
+      const label = sheet.isSelectedVersion ? `${formatVersionLabel(sheet)} export` : formatVersionLabel(sheet);
+      return `
+        <button
+          class="preview-version-switch ${isActive ? "is-active" : ""}"
+          type="button"
+          data-preview-compare-id="${escapeHtml(sheet.id)}"
+        >
+          ${escapeHtml(label)}
+        </button>
+      `;
+    })
+    .join("");
+
+  if (!compareSheet) {
+    elements.previewCompareMeta.innerHTML = `
+      <div class="preview-compare-meta__top">
+        <div>
+          <p class="eyebrow">Compare version</p>
+          <h4>Select another version</h4>
+        </div>
+      </div>
+      <p class="muted">Pick a redo version above to compare it against the current focus sheet.</p>
+    `;
+    return;
+  }
+
+  const compareExportButtonLabel = compareSheet.isSelectedVersion
+    ? "Current export version"
+    : state.selectingSpritesheetId === compareSheet.id
+      ? "Using version..."
+      : "Use for export";
+
+  elements.previewCompareMeta.innerHTML = `
+    <div class="preview-compare-meta__top">
+      <div>
+        <p class="eyebrow">Compare version</p>
+        <h4>${escapeHtml(compareSheet.name)} · ${escapeHtml(formatVersionLabel(compareSheet))}</h4>
+      </div>
+      <div class="preview-picker__meta">
+        <span class="version-chip">Compare</span>
+        ${getSelectedVersionChipMarkup(compareSheet)}
+      </div>
+    </div>
+    <p class="muted">${
+      compareAsset
+        ? "Frame sync follows the active loop scrub, so you can check silhouette, timing, and crop changes directly."
+        : "Loading atlas and pixels for this version."
+    }</p>
+    <div class="preview-meta__facts">
+      ${buildPreviewCompareFacts(compareSheet, compareSheet.isSelectedVersion ? "Current export version" : "Preview only")}
+    </div>
+    <div class="preview-compare-actions">
+      <button class="btn btn-secondary" type="button" data-preview-id="${escapeHtml(compareSheet.id)}">
+        Make focus version
+      </button>
+      <button
+        class="btn btn-secondary"
+        type="button"
+        data-select-spritesheet-id="${escapeHtml(compareSheet.id)}"
+        ${compareSheet.isSelectedVersion || state.selectingSpritesheetId === compareSheet.id ? "disabled" : ""}
+      >
+        ${escapeHtml(compareExportButtonLabel)}
+      </button>
+    </div>
+  `;
+}
+
+function getCurrentRuntimePreviewAsset() {
+  return getPreviewRuntimeAsset(state.previewRuntimeActionId) || ensurePreviewRuntimeAsset(state.previewRuntimeActionId);
+}
+
+function getCurrentRuntimePreviewFrame() {
+  const runtimeAsset = getCurrentRuntimePreviewAsset();
+  if (!runtimeAsset || !Array.isArray(runtimeAsset.atlas?.frames) || runtimeAsset.atlas.frames.length === 0) {
+    return null;
+  }
+
+  state.previewRuntimeFrameIndex = clamp(state.previewRuntimeFrameIndex, 0, runtimeAsset.atlas.frames.length - 1);
+  return {
+    asset: runtimeAsset,
+    frame: runtimeAsset.atlas.frames[state.previewRuntimeFrameIndex] || runtimeAsset.atlas.frames[0],
+  };
+}
+
+function getPreviewRuntimeLabel() {
+  const runtimeAsset = getCurrentRuntimePreviewAsset();
+  if (runtimeAsset?.detail?.name) {
+    return runtimeAsset.detail.name;
+  }
+
+  if (state.activePreview?.name) {
+    return state.activePreview.name;
+  }
+
+  return "No preview loaded";
+}
+
+function setPreviewRuntimeAction(actionId, mode = "idle") {
+  if (!actionId) {
+    return;
+  }
+
+  const asset = ensurePreviewRuntimeAsset(actionId);
+  if (!asset && state.previewRuntimeActionId !== actionId) {
+    return;
+  }
+
+  if (state.previewRuntimeActionId !== actionId) {
+    state.previewRuntimeActionId = actionId;
+    state.previewRuntimeFrameIndex = 0;
+    state.previewRuntimeLastTick = 0;
+    state.previewRuntimeCompleted = false;
+  }
+
+  state.previewRuntimeMode = mode;
+}
+
+function queuePreviewRuntimeAction(actionId) {
+  state.previewRuntimePendingActionId = actionId;
+  startPreviewLoop();
+}
+
+function getPreviewScene() {
+  return PREVIEW_SCENES.find((scene) => scene.id === state.previewSceneId) || PREVIEW_SCENES[0];
+}
+
+function pickRandomPreviewSceneId() {
+  return PREVIEW_SCENES[Math.floor(Math.random() * PREVIEW_SCENES.length)].id;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function focusPreviewSceneShell() {
+  if (state.currentStage !== "preview" || !elements.previewSceneShell) {
+    return;
+  }
+
+  elements.previewSceneShell.focus({ preventScroll: true });
 }
 
 function selectedActionCount() {
@@ -175,7 +1040,7 @@ function getQueueLabel() {
 
 function getNextStepLabel() {
   if (!state.selectedCharacter) {
-    return "Upload a base character";
+    return "Upload or generate a base character";
   }
 
   if (state.currentStage === "character") {
@@ -183,7 +1048,7 @@ function getNextStepLabel() {
   }
 
   if (state.currentStage === "animate") {
-    return selectedActionCount() > 0 ? "Generate preview" : "Choose motions";
+    return selectedActionCount() > 0 ? "Generate walk sheet" : "Choose motions";
   }
 
   if (state.currentStage === "preview") {
@@ -195,15 +1060,15 @@ function getNextStepLabel() {
 
 function getStageSubtitle() {
   if (!state.selectedCharacter) {
-    return "Upload one character, choose the motions, preview the result, and export production-ready sheets.";
+    return "Upload or generate one character, choose the motions, preview the result, and export production-ready sheets.";
   }
 
   if (state.currentStage === "character") {
-    return state.selectedCharacter.characterDescription || "Base character ready. Continue when the silhouette looks stable.";
+    return state.selectedCharacter.characterDescription || "Base art is loaded. Check the source character, then jump into Animate, Preview, or Exports.";
   }
 
   if (state.currentStage === "animate") {
-    return "Select the standard pack first, then branch into pose or custom action setup only when needed.";
+    return "Start with the long side-view walk cycle first for a side-scrolling game. Use pose and custom action tools only after the base sheet is close.";
   }
 
   if (state.currentStage === "preview") {
@@ -233,11 +1098,34 @@ function setStage(stage, { force = false } = {}) {
     return;
   }
 
+  if (stage !== "preview") {
+    clearPreviewSceneKeys();
+    stopPreviewLoop();
+  }
+
+  if (stage !== "animate") {
+    stopAnimatePreviewLoop();
+  }
+
   state.currentStage = stage;
   renderStageShell();
 
   if (stage === "preview" && state.spritesheets.length > 0 && !state.activePreview) {
     void loadPreview(state.spritesheets[0].id);
+    return;
+  }
+
+  if (stage === "preview") {
+    if (state.activePreview) {
+      drawCurrentPreviewFrame();
+      startPreviewLoop();
+    }
+    focusPreviewSceneShell();
+  }
+
+  if (stage === "animate") {
+    renderAnimateConsequencePanel();
+    startAnimatePreviewLoop();
   }
 }
 
@@ -318,7 +1206,7 @@ function renderAuthState() {
     return;
   }
 
-  elements.authSummary.innerHTML = `<p class="muted">Generation runs through Neta. Paste your token here before using prompt pose or spritesheet generation.</p>`;
+  elements.authSummary.innerHTML = `<p class="muted">Generation runs through Neta. Paste your token here before using prompt character, prompt pose, or spritesheet generation.</p>`;
 }
 
 function renderWorkspaceHeader() {
@@ -334,6 +1222,9 @@ function renderWorkspaceHeader() {
   if (elements.nextStepLabel) {
     elements.nextStepLabel.textContent = getNextStepLabel();
   }
+
+  renderWorkspaceActionDeck();
+  renderWorkspaceCurrentResultCard();
 }
 
 function renderWorkspaceSummary() {
@@ -357,17 +1248,132 @@ function renderWorkspaceSummary() {
   renderWorkspaceHeader();
 }
 
+function renderWorkspaceActionDeck() {
+  if (!elements.workspaceActionButtons) {
+    return;
+  }
+
+  if (!state.selectedCharacter) {
+    elements.workspaceActionButtons.innerHTML = `<p class="muted">Select a character to open its source art, motion build, preview, and exports.</p>`;
+    return;
+  }
+
+  const primarySheet = getPrimarySpritesheet();
+  const previewLabel = primarySheet ? `${primarySheet.name} · ${formatVersionLabel(primarySheet)}` : "No render yet";
+
+  elements.workspaceActionButtons.innerHTML = `
+    <button
+      class="project-action-button ${state.currentStage === "character" ? "is-active" : ""}"
+      type="button"
+      data-workspace-stage="character"
+    >
+      <strong>Base art</strong>
+      <span>Inspect the source character</span>
+    </button>
+    <button
+      class="project-action-button ${state.currentStage === "animate" ? "is-active" : ""}"
+      type="button"
+      data-workspace-stage="animate"
+    >
+      <strong>Animate</strong>
+      <span>Pick motions and generate</span>
+    </button>
+    <button
+      class="project-action-button ${state.currentStage === "preview" ? "is-active" : ""}"
+      type="button"
+      data-workspace-preview-current="${primarySheet ? escapeHtml(primarySheet.id) : ""}"
+      ${primarySheet ? "" : "disabled"}
+    >
+      <strong>Current result</strong>
+      <span>${escapeHtml(previewLabel)}</span>
+    </button>
+    <button
+      class="project-action-button ${state.currentStage === "spritesheets" ? "is-active" : ""}"
+      type="button"
+      data-workspace-stage="spritesheets"
+      ${stageIsAccessible("spritesheets") ? "" : "disabled"}
+    >
+      <strong>Exports</strong>
+      <span>${stageIsAccessible("spritesheets") ? "Open finished sheets" : "No exports yet"}</span>
+    </button>
+  `;
+}
+
+function renderWorkspaceCurrentResultCard() {
+  if (!elements.workspaceCurrentResult) {
+    return;
+  }
+
+  if (!state.selectedCharacter) {
+    elements.workspaceCurrentResult.innerHTML = `
+      <p class="eyebrow">Current result</p>
+      <h3>Select a character</h3>
+      <p class="muted">The latest render and quick continue actions will appear here.</p>
+    `;
+    return;
+  }
+
+  const primarySheet = getPrimarySpritesheet();
+  if (!primarySheet) {
+    elements.workspaceCurrentResult.innerHTML = `
+      <p class="eyebrow">Current result</p>
+      <h3>${activeJobCount() > 0 ? "Render in progress" : "No motion rendered yet"}</h3>
+      <p class="muted">${
+        activeJobCount() > 0
+          ? "A queued job is still running. The first completed sheet will appear here automatically."
+          : "Open Animate and generate the first walk cycle for this character."
+      }</p>
+      <div class="result-card__links">
+        <button class="btn btn-secondary" type="button" data-workspace-stage="animate">Open Animate</button>
+      </div>
+    `;
+    return;
+  }
+
+  const updatedLabel = formatShortDate(primarySheet.updatedAt || primarySheet.createdAt || state.selectedCharacter.updatedAt);
+
+  elements.workspaceCurrentResult.innerHTML = `
+    <p class="eyebrow">${escapeHtml(primarySheet.isSelectedVersion ? "Current export" : "Latest render")}</p>
+    <div class="workspace-result-card__body">
+      <img
+        class="workspace-result-card__thumbnail"
+        src="${escapeHtml(primarySheet.sheetUrl)}"
+        alt="${escapeHtml(primarySheet.name)} spritesheet preview"
+      />
+      <div class="workspace-result-card__copy">
+        <h3>${escapeHtml(primarySheet.name)} · ${escapeHtml(formatVersionLabel(primarySheet))}</h3>
+        <p class="muted">${primarySheet.frameCount} frames · ${escapeHtml(formatFrameDimensions(primarySheet))}</p>
+        <div class="preview-meta__facts">
+          <span class="${statusClass(primarySheet.status)}">${escapeHtml(primarySheet.status)}</span>
+          <span>${escapeHtml(`${primarySheet.columns} cols`)}</span>
+          <span>${escapeHtml(updatedLabel)}</span>
+          <span>${escapeHtml(primarySheet.isSelectedVersion ? "Selected for export" : "Preview only")}</span>
+        </div>
+      </div>
+    </div>
+    <div class="result-card__links">
+      <button class="btn btn-secondary" type="button" data-workspace-preview-current="${escapeHtml(primarySheet.id)}">Open Preview</button>
+      <button class="btn btn-secondary" type="button" data-workspace-stage="spritesheets">Open Exports</button>
+      <button class="btn btn-secondary" type="button" data-workspace-export-package ${getCharacterExportUrl() ? "" : "disabled"}>
+        Download package
+      </button>
+    </div>
+  `;
+}
+
 function renderCharacters() {
   if (state.characters.length === 0) {
-    elements.characterList.innerHTML = `<p class="muted">No characters yet. Upload one on the Character stage.</p>`;
+    elements.characterList.innerHTML = `<p class="muted">No characters yet. Upload one or generate one on the Character stage.</p>`;
     return;
   }
 
   elements.characterList.innerHTML = state.characters
     .map((character) => {
       const notes = character.analysis?.notes?.length ? `<p class="muted">${escapeHtml(character.analysis.notes[0])}</p>` : "";
+      const isSelected = character.id === state.selectedCharacterId;
+      const sourceLabel = `${getCharacterSourceLabel(character)} · ${formatShortDate(character.updatedAt || character.createdAt)}`;
       return `
-        <article class="character-card ${character.id === state.selectedCharacterId ? "is-selected" : ""}" data-character-id="${escapeHtml(character.id)}">
+        <article class="character-card ${isSelected ? "is-selected" : ""}" data-character-id="${escapeHtml(character.id)}">
           <div class="character-card__top">
             <img class="character-card__thumbnail" src="${escapeHtml(character.thumbnailUrl || character.baseImageUrl)}" alt="${escapeHtml(character.name)}" />
             <span class="${statusClass("succeeded")}">ready</span>
@@ -377,6 +1383,10 @@ function renderCharacters() {
               <h3>${escapeHtml(character.name)}</h3>
               <p class="muted">${character.isHumanoid ? "Humanoid motion" : "Wide-body motion"}</p>
             </div>
+          </div>
+          <div class="character-card__footer">
+            <span class="character-card__meta">${escapeHtml(sourceLabel)}</span>
+            <span class="character-card__state">${isSelected ? "Loaded" : "Open"}</span>
           </div>
           ${notes}
         </article>
@@ -489,13 +1499,297 @@ function renderGenerateSummary() {
   } else if (count === 0) {
     elements.generateSummaryTitle.textContent = "Nothing selected";
     elements.generateSummaryCopy.textContent = "Choose one or more motions to unlock generation.";
+  } else if (
+    count === 1 &&
+    state.selectedCustomActionIds.length === 0 &&
+    state.selectedStandardActionIds.length === 1 &&
+    state.selectedStandardActionIds[0] === "walk"
+  ) {
+    elements.generateSummaryTitle.textContent = "Walk cycle ready";
+    elements.generateSummaryCopy.textContent = "Generate one long 48-frame walk sheet first.";
   } else {
     elements.generateSummaryTitle.textContent = `${pluralize(count, "motion")} selected`;
     elements.generateSummaryCopy.textContent = `${pluralize(count, "job")} will enter the queue when you generate.`;
   }
 
   elements.generateButton.disabled = !hasCharacter || missingToken || count === 0;
-  elements.generateButton.textContent = count > 0 ? `Generate ${pluralize(count, "spritesheet")}` : "Generate spritesheets";
+  elements.generateButton.textContent =
+    count === 1 && state.selectedStandardActionIds[0] === "walk" && state.selectedCustomActionIds.length === 0
+      ? "Generate walk spritesheet"
+      : count > 0
+        ? `Generate ${pluralize(count, "spritesheet")}`
+        : "Generate spritesheets";
+
+  renderAnimateConsequencePanel();
+}
+
+function stopAnimatePreviewLoop() {
+  if (state.animatePreviewTimer) {
+    cancelAnimationFrame(state.animatePreviewTimer);
+    state.animatePreviewTimer = null;
+  }
+}
+
+function setAnimatePreviewCharacterVisible(visible) {
+  if (!elements.animatePreviewCharacter || !elements.animatePreviewCanvas) {
+    return;
+  }
+
+  elements.animatePreviewCharacter.classList.toggle("hidden", !visible);
+  elements.animatePreviewCanvas.classList.toggle("hidden", visible);
+}
+
+function syncAnimateInspectorTarget() {
+  const target = getAnimateInspectorTarget();
+  state.animateFocusedMotionKey = target.motionKey;
+
+  if (state.animatePreviewSheetId !== target.sheetId) {
+    state.animatePreviewSheetId = target.sheetId;
+    state.animatePreviewFrameIndex = 0;
+    state.animatePreviewLastTick = 0;
+  }
+
+  return target;
+}
+
+function scheduleAnimatePreviewAssetLoad(sheet) {
+  if (!sheet) {
+    return;
+  }
+
+  void loadPreviewRuntimeAsset(sheet)
+    .then(() => {
+      if (state.currentStage === "animate") {
+        renderAnimateConsequencePanel();
+        drawAnimatePreviewFrame();
+        startAnimatePreviewLoop();
+      }
+    })
+    .catch((error) => {
+      console.error(`Failed to load animate preview asset ${sheet.id}`, error);
+    });
+}
+
+function drawAnimatePreviewFrame() {
+  if (!elements.animatePreviewCanvas) {
+    return;
+  }
+
+  const target = syncAnimateInspectorTarget();
+  const sheet = getSpritesheetById(target.sheetId);
+  const asset = sheet ? state.previewRuntimeAssets[sheet.id] || null : null;
+
+  if (!sheet || !asset) {
+    animatePreviewContext.clearRect(0, 0, elements.animatePreviewCanvas.width, elements.animatePreviewCanvas.height);
+    return;
+  }
+
+  drawAssetFrameToCanvas({
+    canvas: elements.animatePreviewCanvas,
+    context: animatePreviewContext,
+    detail: sheet,
+    atlas: asset.atlas,
+    image: asset.image,
+    frameIndex: state.animatePreviewFrameIndex,
+  });
+}
+
+function drawAnimatePreviewLoopFrame(timestamp) {
+  if (state.currentStage !== "animate") {
+    state.animatePreviewTimer = null;
+    return;
+  }
+
+  const target = syncAnimateInspectorTarget();
+  const sheet = getSpritesheetById(target.sheetId);
+  const asset = sheet ? state.previewRuntimeAssets[sheet.id] || null : null;
+  const frameCount = Array.isArray(asset?.atlas?.frames) ? asset.atlas.frames.length : 0;
+
+  if (!sheet || !asset || frameCount === 0) {
+    state.animatePreviewTimer = null;
+    return;
+  }
+
+  const stepMs = 1000 / 12;
+  if (state.animatePreviewLastTick === 0) {
+    state.animatePreviewLastTick = timestamp;
+    state.animatePreviewFrameIndex = clamp(state.animatePreviewFrameIndex, 0, frameCount - 1);
+  } else if (timestamp - state.animatePreviewLastTick >= stepMs) {
+    state.animatePreviewLastTick = timestamp;
+    state.animatePreviewFrameIndex = state.animatePreviewFrameIndex >= frameCount - 1 ? 0 : state.animatePreviewFrameIndex + 1;
+  }
+
+  drawAnimatePreviewFrame();
+  state.animatePreviewTimer = requestAnimationFrame(drawAnimatePreviewLoopFrame);
+}
+
+function startAnimatePreviewLoop() {
+  if (state.currentStage !== "animate" || state.animatePreviewTimer) {
+    return;
+  }
+
+  const target = syncAnimateInspectorTarget();
+  const sheet = getSpritesheetById(target.sheetId);
+  const asset = sheet ? state.previewRuntimeAssets[sheet.id] || null : null;
+  const frameCount = Array.isArray(asset?.atlas?.frames) ? asset.atlas.frames.length : 0;
+
+  if (!sheet || !asset || frameCount === 0) {
+    return;
+  }
+
+  state.animatePreviewLastTick = 0;
+  state.animatePreviewTimer = requestAnimationFrame(drawAnimatePreviewLoopFrame);
+}
+
+function renderAnimateConsequencePanel() {
+  if (
+    !elements.animateConsequenceSummary ||
+    !elements.animateSelectionChips ||
+    !elements.animatePreviewCharacter ||
+    !elements.animatePreviewMeta ||
+    !elements.animateOpenPreview
+  ) {
+    return;
+  }
+
+  const selectedMotionKeys = getSelectedAnimateMotionKeys();
+  const target = syncAnimateInspectorTarget();
+  const targetSheet = getSpritesheetById(target.sheetId);
+  const targetPrompt = getAnimateMotionPrompt(target.motionKey);
+  const readySelectionCount = selectedMotionKeys.filter((motionKey) => getAnimateMotionSheets(motionKey).length > 0).length;
+
+  if (!state.selectedCharacter) {
+    elements.animateConsequenceSummary.innerHTML = `<p class="muted">Select a character to unlock motion planning.</p>`;
+    elements.animateSelectionChips.innerHTML = "";
+    elements.animatePreviewMeta.innerHTML = `<p class="muted">No character selected yet.</p>`;
+    elements.animateOpenPreview.disabled = true;
+    elements.animateOpenPreview.dataset.previewId = "";
+    elements.animatePreviewCharacter.removeAttribute("src");
+    elements.animatePreviewCharacter.alt = "";
+    setAnimatePreviewCharacterVisible(true);
+    stopAnimatePreviewLoop();
+    return;
+  }
+
+  const previewImageUrl = state.selectedCharacter.thumbnailUrl || state.selectedCharacter.baseImageUrl || "";
+  if (previewImageUrl) {
+    elements.animatePreviewCharacter.src = previewImageUrl;
+    elements.animatePreviewCharacter.alt = `${state.selectedCharacter.name} character art`;
+  } else {
+    elements.animatePreviewCharacter.removeAttribute("src");
+    elements.animatePreviewCharacter.alt = "";
+  }
+
+  if (selectedMotionKeys.length === 0) {
+    elements.animateConsequenceSummary.innerHTML = `
+      <p class="muted">Choose motions to see what the next batch adds and to reopen any current result for that motion.</p>
+      <div class="preview-meta__facts">
+        <span>No batch selected</span>
+        <span>${escapeHtml(getQueueLabel())}</span>
+      </div>
+    `;
+    elements.animateSelectionChips.innerHTML = "";
+    elements.animatePreviewMeta.innerHTML = `
+      <p class="eyebrow">Current source</p>
+      <h3>${escapeHtml(state.selectedCharacter.name)}</h3>
+      <p class="muted">The right pane will switch from base art to a live motion preview as soon as you pick a motion that already has a sheet.</p>
+    `;
+    elements.animateOpenPreview.disabled = true;
+    elements.animateOpenPreview.dataset.previewId = "";
+    setAnimatePreviewCharacterVisible(true);
+    stopAnimatePreviewLoop();
+    return;
+  }
+
+  elements.animateConsequenceSummary.innerHTML = `
+    <p class="muted">${pluralize(selectedActionCount(), "motion")} ready. Generating now adds ${pluralize(selectedActionCount(), "job")} to the queue.</p>
+    <div class="preview-meta__facts">
+      <span>${escapeHtml(getQueueLabel())}</span>
+      <span>${pluralize(readySelectionCount, "selected motion")} already have results</span>
+      <span>${pluralize(Math.max(selectedActionCount() - readySelectionCount, 0), "selected motion")} still need a first render</span>
+    </div>
+  `;
+
+  elements.animateSelectionChips.innerHTML = selectedMotionKeys
+    .map((motionKey) => {
+      const motionSheets = getAnimateMotionSheets(motionKey);
+      const readySheet = motionSheets.find((sheet) => sheet.isSelectedVersion) || motionSheets[0] || null;
+      const isActive = motionKey === target.motionKey;
+      return `
+        <button
+          class="animate-selection-chip ${isActive ? "is-active" : ""}"
+          type="button"
+          data-animate-motion-key="${escapeHtml(motionKey)}"
+        >
+          <strong>${escapeHtml(getAnimateMotionLabel(motionKey))}</strong>
+          <span>${escapeHtml(readySheet ? `${formatVersionLabel(readySheet)} ready` : "Not generated yet")}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  if (!target.motionKey) {
+    elements.animatePreviewMeta.innerHTML = `<p class="muted">No motion selected yet.</p>`;
+    elements.animateOpenPreview.disabled = true;
+    elements.animateOpenPreview.dataset.previewId = "";
+    setAnimatePreviewCharacterVisible(true);
+    stopAnimatePreviewLoop();
+    return;
+  }
+
+  if (!targetSheet) {
+    elements.animatePreviewMeta.innerHTML = `
+      <p class="eyebrow">Pending result</p>
+      <h3>${escapeHtml(getAnimateMotionLabel(target.motionKey))}</h3>
+      <p class="muted">${
+        targetPrompt
+          ? escapeHtml(targetPrompt)
+          : "No current sheet exists for this motion yet. Generate the batch and the result will land here."
+      }</p>
+      <div class="preview-meta__facts">
+        <span>Waiting for first render</span>
+        <span>${escapeHtml(`${pluralize(getAnimateMotionSheets(target.motionKey).length, "saved version")}`)}</span>
+      </div>
+    `;
+    elements.animateOpenPreview.disabled = true;
+    elements.animateOpenPreview.dataset.previewId = "";
+    setAnimatePreviewCharacterVisible(true);
+    stopAnimatePreviewLoop();
+    return;
+  }
+
+  const targetVersions = getAnimateMotionSheets(target.motionKey).length;
+  const previewAsset = state.previewRuntimeAssets[targetSheet.id] || null;
+
+  elements.animatePreviewMeta.innerHTML = `
+    <p class="eyebrow">Current result</p>
+    <h3>${escapeHtml(getAnimateMotionLabel(target.motionKey))} · ${escapeHtml(formatVersionLabel(targetSheet))}</h3>
+    <p class="muted">${
+      previewAsset
+        ? "This is the current result for the selected motion. Reopen it in Preview when you need loop tuning or version approval."
+        : "Loading the current result for this motion."
+    }</p>
+    <div class="preview-meta__facts">
+      <span>${escapeHtml(formatFrameDimensions(targetSheet))}</span>
+      <span>${escapeHtml(`${targetSheet.frameCount} frames`)}</span>
+      <span>${escapeHtml(`${pluralize(targetVersions, "saved version")}`)}</span>
+      <span>${escapeHtml(targetSheet.isSelectedVersion ? "Current export version" : "Preview only")}</span>
+    </div>
+  `;
+
+  elements.animateOpenPreview.disabled = false;
+  elements.animateOpenPreview.dataset.previewId = targetSheet.id;
+  setAnimatePreviewCharacterVisible(false);
+
+  if (!previewAsset) {
+    scheduleAnimatePreviewAssetLoad(targetSheet);
+    stopAnimatePreviewLoop();
+    animatePreviewContext.clearRect(0, 0, elements.animatePreviewCanvas.width, elements.animatePreviewCanvas.height);
+    return;
+  }
+
+  drawAnimatePreviewFrame();
+  startAnimatePreviewLoop();
 }
 
 function updateCustomFormState() {
@@ -529,7 +1823,16 @@ function renderActionList() {
     return;
   }
 
-  const standardItems = state.supportedActions
+  const standardItems = [...state.supportedActions]
+    .sort((left, right) => {
+      if (left.id === "walk") {
+        return -1;
+      }
+      if (right.id === "walk") {
+        return 1;
+      }
+      return 0;
+    })
     .map((action) => {
       const checked = state.selectedStandardActionIds.includes(action.id) ? "checked" : "";
       const copy = ACTION_COPY[action.id] || action.motionPrompt;
@@ -574,6 +1877,7 @@ function renderActionList() {
   `;
 
   renderGenerateSummary();
+  renderAnimateConsequencePanel();
 }
 
 function buildJobListMarkup(emptyMessage) {
@@ -647,10 +1951,11 @@ function renderPreviewPickers() {
       const isActive = state.activePreview?.id === sheet.id;
       return `
         <button class="preview-picker ${isActive ? "is-active" : ""}" type="button" data-preview-id="${escapeHtml(sheet.id)}">
-          <strong>${escapeHtml(sheet.name)}</strong>
-          <p class="muted">${sheet.frameCount} frames · ${sheet.frameWidth}px</p>
+          <strong>${escapeHtml(sheet.name)} · ${escapeHtml(formatVersionLabel(sheet))}</strong>
+          <p class="muted">${sheet.frameCount} frames · ${formatFrameDimensions(sheet)}</p>
           <div class="preview-picker__meta">
             <span class="${statusClass(sheet.status)}">${escapeHtml(sheet.status)}</span>
+            ${getSelectedVersionChipMarkup(sheet)}
           </div>
         </button>
       `;
@@ -658,7 +1963,35 @@ function renderPreviewPickers() {
     .join("");
 }
 
+function renderPreviewSceneButtons() {
+  if (!elements.previewScenePicker) {
+    return;
+  }
+
+  const hasPreview = Boolean(state.activePreview);
+  const currentScene = state.previewSceneId || PREVIEW_SCENES[0].id;
+
+  elements.previewScenePicker.innerHTML = PREVIEW_SCENES.map((scene) => {
+    const isActive = currentScene === scene.id;
+    return `
+      <button
+        class="preview-scene-chip ${isActive ? "is-active" : ""}"
+        type="button"
+        data-preview-scene-id="${escapeHtml(scene.id)}"
+        ${hasPreview ? "" : "disabled"}
+      >
+        ${escapeHtml(scene.label)}
+      </button>
+    `;
+  }).join("");
+}
+
 function renderSpritesheets() {
+  const canExportPackage = Boolean(getCharacterExportUrl());
+  if (elements.exportsDownloadPackage) {
+    elements.exportsDownloadPackage.disabled = !canExportPackage;
+  }
+
   if (!state.selectedCharacter) {
     elements.spritesheetList.innerHTML = `<p class="muted">Create or select a character to see results.</p>`;
     return;
@@ -676,13 +2009,36 @@ function renderSpritesheets() {
           <div class="result-card__header">
             <div>
               <h3>${escapeHtml(sheet.name)}</h3>
-              <p class="muted">${sheet.frameCount} frames · ${sheet.frameWidth}px · ${sheet.columns} columns</p>
+              <p class="muted">${escapeHtml(formatVersionLabel(sheet))} · ${sheet.frameCount} frames · ${formatFrameDimensions(sheet)} · ${sheet.columns} columns</p>
             </div>
             <span class="${statusClass(sheet.status)}">${escapeHtml(sheet.status)}</span>
           </div>
+          ${sheet.isSelectedVersion ? `<div class="result-card__badges">${getSelectedVersionChipMarkup(sheet)}</div>` : ""}
           <img src="${escapeHtml(sheet.sheetUrl)}" alt="${escapeHtml(sheet.name)} spritesheet preview" />
           <div class="result-card__links">
             <button class="button button--primary" type="button" data-preview-id="${escapeHtml(sheet.id)}">Preview</button>
+            <button
+              class="button button--secondary"
+              type="button"
+              data-redo-spritesheet-id="${escapeHtml(sheet.id)}"
+              ${state.redoingSpritesheetId === sheet.id ? "disabled" : ""}
+            >
+              ${state.redoingSpritesheetId === sheet.id ? "Redoing..." : "Redo"}
+            </button>
+            <button
+              class="button button--secondary"
+              type="button"
+              data-select-spritesheet-id="${escapeHtml(sheet.id)}"
+              ${sheet.isSelectedVersion || state.selectingSpritesheetId === sheet.id ? "disabled" : ""}
+            >
+              ${
+                sheet.isSelectedVersion
+                  ? "Current export version"
+                  : state.selectingSpritesheetId === sheet.id
+                    ? "Using version..."
+                    : "Use for export"
+              }
+            </button>
             <a class="link-chip" href="${escapeHtml(sheet.sheetUrl)}" download>PNG spritesheet</a>
             <a class="link-chip" href="${escapeHtml(sheet.atlasUrl)}" download>JSON atlas</a>
           </div>
@@ -694,32 +2050,81 @@ function renderSpritesheets() {
 
 function renderPreviewControls() {
   const hasPreview = Boolean(state.activePreview && state.previewAtlas);
-  const frameCount = hasPreview ? state.previewAtlas.frames.length : 0;
+  const frameCount = hasPreview ? getPreviewFrameCount() : 0;
   const maxIndex = Math.max(frameCount - 1, 0);
+  const scene = getPreviewScene();
 
+  elements.previewFrameScrub.max = String(maxIndex);
   elements.previewRangeStart.max = String(maxIndex);
   elements.previewRangeEnd.max = String(maxIndex);
+  elements.previewFrameScrub.disabled = !hasPreview;
   elements.previewRangeStart.disabled = !hasPreview;
   elements.previewRangeEnd.disabled = !hasPreview;
   elements.previewFps.disabled = !hasPreview;
+  elements.previewPlayToggle.disabled = !hasPreview;
+  elements.previewPlayToggleSecondary.disabled = !hasPreview;
+  if (elements.previewSelectVersion) {
+    elements.previewSelectVersion.disabled = !hasPreview || state.selectingSpritesheetId === state.activePreview?.id;
+    elements.previewSelectVersion.textContent = !hasPreview
+      ? "Approve for export"
+      : state.selectingSpritesheetId === state.activePreview?.id
+        ? "Approving..."
+        : state.activePreview?.isSelectedVersion
+          ? "Open exports"
+          : "Approve for export";
+  }
+  if (elements.previewRedoMotion) {
+    elements.previewRedoMotion.disabled = !hasPreview || state.redoingSpritesheetId === state.activePreview?.id;
+    elements.previewRedoMotion.textContent =
+      state.redoingSpritesheetId === state.activePreview?.id ? "Redoing..." : "Redo motion";
+  }
+  if (elements.previewDownloadPackage) {
+    elements.previewDownloadPackage.disabled = !getCharacterExportUrl();
+  }
   elements.previewToExports.disabled = !stageIsAccessible("spritesheets");
 
   if (!hasPreview) {
+    elements.previewFrameScrub.value = "0";
     elements.previewRangeStart.value = "0";
     elements.previewRangeEnd.value = "0";
+    elements.previewFrameReadout.textContent = "Frame 0 / 0";
     elements.previewLoopReadout.textContent = "Frames 0 to 0";
     elements.previewFpsReadout.textContent = `${state.previewFps} FPS`;
+    elements.previewOutputReadout.textContent = "Unknown export";
+    elements.previewAtlasReadout.textContent = "No atlas";
+    elements.previewDimensionsReadout.textContent = "Unknown size";
+    elements.previewSheetReadout.textContent = "No atlas loaded";
+    elements.previewSceneReadout.textContent = "Awaiting a generated result";
+    elements.previewMotionReadout.textContent = "No preview loaded";
+    elements.previewPositionReadout.textContent = "Waiting on input";
+    elements.previewPlayToggle.textContent = "Pause loop";
+    elements.previewPlayToggleSecondary.textContent = "Pause";
+    renderActionMessages();
     return;
   }
 
-  const loopStart = Math.min(state.previewLoopStart, state.previewLoopEnd);
-  const loopEnd = Math.max(state.previewLoopStart, state.previewLoopEnd);
+  const { loopStart, loopEnd } = getPreviewLoopBounds();
+  state.previewFrameIndex = Math.min(Math.max(state.previewFrameIndex, 0), maxIndex);
 
+  elements.previewFrameScrub.value = String(state.previewFrameIndex);
   elements.previewRangeStart.value = String(loopStart);
   elements.previewRangeEnd.value = String(loopEnd);
   elements.previewFps.value = String(state.previewFps);
-  elements.previewLoopReadout.textContent = `Frames ${loopStart} to ${loopEnd}`;
-  elements.previewFpsReadout.textContent = `${state.previewFps} FPS`;
+  elements.previewFrameReadout.textContent = `Frame ${state.previewFrameIndex + 1} / ${frameCount}`;
+  elements.previewLoopReadout.textContent = `Frames ${loopStart + 1} to ${loopEnd + 1}`;
+  elements.previewFpsReadout.textContent = state.previewPaused ? `Paused at ${state.previewFps} FPS` : `${state.previewFps} FPS live`;
+  elements.previewOutputReadout.textContent = `${formatFrameDimensions(state.activePreview)} · ${state.activePreview.frameCount} frames`;
+  elements.previewAtlasReadout.textContent = `${state.activePreview.columns} cols · ${state.activePreview.rows} rows`;
+  elements.previewDimensionsReadout.textContent = formatFrameDimensions(state.activePreview);
+  elements.previewSheetReadout.textContent = `${state.previewFrameIndex + 1} selected · ${state.activePreview.columns}x${state.activePreview.rows}`;
+  elements.previewSceneReadout.textContent = scene.label;
+  elements.previewMotionReadout.textContent = `${getPreviewRuntimeLabel()} · ${state.previewPaused ? "paused" : "live"}`;
+  elements.previewPositionReadout.textContent = `${Math.round((state.previewScenePlayerX / PREVIEW_SCENE_WORLD_WIDTH) * 100)}% across · ${
+    state.previewSceneJumpOffset > 0 ? "airborne" : "grounded"
+  }`;
+  elements.previewPlayToggle.textContent = state.previewPaused ? "Resume loop" : "Pause loop";
+  elements.previewPlayToggleSecondary.textContent = state.previewPaused ? "Resume" : "Pause";
+  renderActionMessages();
 }
 
 function renderStageShell() {
@@ -743,6 +2148,12 @@ function renderStageShell() {
     panel.hidden = !isActive;
   }
 
+  if (state.currentStage !== "animate") {
+    stopAnimatePreviewLoop();
+  }
+
+  renderAnimateConsequencePanel();
+  renderPreviewComparePanel();
   renderPreviewControls();
 
   if (state.currentStage === "preview" && state.spritesheets.length > 0 && !state.activePreview) {
@@ -829,21 +2240,30 @@ async function loadCharacters() {
 async function loadSupportedActions() {
   const payload = await fetchJson("/api/supported-actions");
   state.supportedActions = payload.actions;
+  if (
+    state.selectedCharacter &&
+    state.selectedStandardActionIds.length === 0 &&
+    state.selectedCustomActionIds.length === 0 &&
+    state.supportedActions.some((action) => action.id === "walk")
+  ) {
+    state.selectedStandardActionIds = ["walk"];
+  }
   renderActionList();
 }
 
-async function selectCharacter(characterId) {
+async function selectCharacter(characterId, { preferredStage = "character" } = {}) {
   state.selectedCharacterId = characterId;
   state.selectedCharacter = await fetchJson(`/api/characters/${characterId}`);
   state.poses = [];
   state.customAnimations = [];
   state.spritesheets = [];
   state.jobs = [];
-  state.selectedStandardActionIds = [];
+  state.selectedStandardActionIds = state.supportedActions.some((action) => action.id === "walk") ? ["walk"] : [];
   state.selectedCustomActionIds = [];
   state.pendingPreview = null;
   resetPreview("Loading current character results...");
   clearBuildMessages();
+  clearActionMessages();
 
   renderAnalysisCard(state.selectedCharacter);
   renderWorkspaceSummary();
@@ -853,6 +2273,7 @@ async function selectCharacter(characterId) {
   renderAllJobLists();
   renderPreviewPickers();
   renderSpritesheets();
+  renderActionMessages();
   renderActionList();
 
   await Promise.all([
@@ -864,7 +2285,7 @@ async function selectCharacter(characterId) {
 
   renderActionList();
   setAnimatePanel("select");
-  setStage("animate", { force: true });
+  setStage(preferredStage, { force: true });
 
   if (activeJobCount() > 0) {
     startPolling();
@@ -893,10 +2314,18 @@ async function loadCustomAnimations(characterId) {
 async function loadSpritesheets(characterId) {
   const payload = await fetchJson(`/api/characters/${characterId}/spritesheets`);
   state.spritesheets = payload.spritesheets;
+  if (state.activePreview) {
+    const refreshedActivePreview = state.spritesheets.find((sheet) => sheet.id === state.activePreview.id);
+    if (refreshedActivePreview) {
+      state.activePreview = { ...state.activePreview, ...refreshedActivePreview };
+    }
+  }
+  rebuildPreviewRuntimeCatalog();
   renderPreviewPickers();
   renderSpritesheets();
   renderWorkspaceSummary();
   renderStageShell();
+  renderAnimateConsequencePanel();
 
   if (state.spritesheets.length === 0) {
     resetPreview(activeJobCount() > 0 ? "Waiting for the first generated result." : "No generated result yet.");
@@ -917,7 +2346,15 @@ async function loadSpritesheets(characterId) {
 
   if (!state.activePreview || !state.spritesheets.some((sheet) => sheet.id === state.activePreview.id)) {
     await loadPreview(state.spritesheets[0].id);
+    return;
   }
+
+  syncPreviewCompareId();
+  primePreviewRuntimeAssets();
+  schedulePreviewCompareAssetLoad();
+  renderAnimateConsequencePanel();
+  renderPreviewComparePanel();
+  drawCurrentPreviewFrame();
 }
 
 async function loadJobs(characterId) {
@@ -937,6 +2374,70 @@ async function loadJobs(characterId) {
   renderStageShell();
 }
 
+async function selectSpritesheetVersion(spritesheetId, { openExports = false } = {}) {
+  if (!state.selectedCharacterId || !spritesheetId) {
+    return;
+  }
+
+  state.selectingSpritesheetId = spritesheetId;
+  setActionMessage("Updating the current export version...");
+  renderPreviewControls();
+  renderPreviewComparePanel();
+  renderSpritesheets();
+
+  try {
+    await fetchJson(`/api/characters/${state.selectedCharacterId}/spritesheets/${spritesheetId}/select`, {
+      method: "POST",
+    });
+    await loadSpritesheets(state.selectedCharacterId);
+    await loadPreview(spritesheetId);
+    setStage(openExports ? "spritesheets" : "preview", { force: true });
+    setActionMessage(openExports ? "Current export version approved and opened in exports." : "Current export version updated.");
+  } catch (error) {
+    setActionError(error.message);
+  } finally {
+    state.selectingSpritesheetId = null;
+    renderPreviewControls();
+    renderPreviewComparePanel();
+    renderSpritesheets();
+  }
+}
+
+async function redoSpritesheetVersion(spritesheetId) {
+  if (!state.selectedCharacterId || !spritesheetId) {
+    return;
+  }
+
+  state.redoingSpritesheetId = spritesheetId;
+  setActionMessage("Submitting a redo job for this motion...");
+  renderPreviewControls();
+  renderPreviewComparePanel();
+  renderSpritesheets();
+
+  try {
+    const response = await fetchJson(`/api/characters/${state.selectedCharacterId}/spritesheets/${spritesheetId}/redo`, {
+      method: "POST",
+    });
+    state.pendingPreview = response.workflow
+      ? {
+          jobId: response.workflow.jobId,
+          sheetId: null,
+        }
+      : null;
+    await loadJobs(state.selectedCharacterId);
+    setStage("preview", { force: true });
+    startPolling();
+    setActionMessage("Redo job started. Preview will switch when the new version finishes.");
+  } catch (error) {
+    setActionError(error.message);
+  } finally {
+    state.redoingSpritesheetId = null;
+    renderPreviewControls();
+    renderPreviewComparePanel();
+    renderSpritesheets();
+  }
+}
+
 function stopPreviewLoop() {
   if (state.previewTimer) {
     cancelAnimationFrame(state.previewTimer);
@@ -944,30 +2445,489 @@ function stopPreviewLoop() {
   }
 }
 
-function drawCurrentPreviewFrame() {
-  if (!state.previewSheetImage || !state.previewAtlas || !state.activePreview) {
-    previewContext.clearRect(0, 0, elements.previewCanvas.width, elements.previewCanvas.height);
+function clearPreviewSceneKeys() {
+  state.previewSceneKeys.left = false;
+  state.previewSceneKeys.right = false;
+  state.previewSceneKeys.up = false;
+  state.previewSceneKeys.down = false;
+  state.previewSceneModifiers.sprint = false;
+  state.previewSceneModifiers.crouch = false;
+}
+
+function clearPreviewRuntimeState({ keepCatalog = false, keepAssets = false } = {}) {
+  state.previewRuntimeActionId = null;
+  state.previewRuntimeFrameIndex = 0;
+  state.previewRuntimeLastTick = 0;
+  state.previewRuntimeCompleted = false;
+  state.previewRuntimeMode = "idle";
+  state.previewRuntimePendingActionId = null;
+  state.previewRuntimeLockedActionId = null;
+
+  if (!keepCatalog) {
+    state.previewRuntimeCatalog = {};
+  }
+
+  if (!keepAssets) {
+    state.previewRuntimeAssets = {};
+    state.previewRuntimeAssetLoads = {};
+  }
+}
+
+function resetPreviewSceneState({ randomizeScene = false } = {}) {
+  if (randomizeScene || !state.previewSceneId) {
+    state.previewSceneId = pickRandomPreviewSceneId();
+  }
+
+  state.previewScenePlayerX = 320;
+  state.previewSceneBaseYRatio = 0.74;
+  state.previewSceneJumpOffset = 0;
+  state.previewSceneJumpVelocity = 0;
+  state.previewSceneFacing = 1;
+  state.previewRenderLastTick = 0;
+  clearPreviewSceneKeys();
+  clearPreviewRuntimeState({ keepCatalog: true, keepAssets: true });
+}
+
+function triggerPreviewJump() {
+  if (!state.activePreview || state.currentStage !== "preview") {
     return;
   }
 
-  const frame = state.previewAtlas.frames[state.previewFrameIndex];
+  if (state.previewSceneJumpOffset > 0 || state.previewSceneJumpVelocity !== 0) {
+    return;
+  }
+
+  state.previewSceneJumpVelocity = PREVIEW_SCENE_JUMP_VELOCITY;
+  startPreviewLoop();
+}
+
+function updatePreviewSceneState(deltaSeconds) {
+  if (!state.activePreview) {
+    return;
+  }
+
+  const horizontalInput = Number(state.previewSceneKeys.right) - Number(state.previewSceneKeys.left);
+  const verticalInput = Number(state.previewSceneKeys.down) - Number(state.previewSceneKeys.up);
+
+  if (horizontalInput !== 0) {
+    state.previewScenePlayerX = clamp(
+      state.previewScenePlayerX + horizontalInput * PREVIEW_SCENE_MOVE_SPEED * deltaSeconds,
+      0,
+      PREVIEW_SCENE_WORLD_WIDTH,
+    );
+    state.previewSceneFacing = horizontalInput < 0 ? -1 : 1;
+  }
+
+  if (verticalInput !== 0) {
+    state.previewSceneBaseYRatio = clamp(
+      state.previewSceneBaseYRatio + verticalInput * PREVIEW_SCENE_VERTICAL_SPEED * deltaSeconds,
+      0.58,
+      0.82,
+    );
+  }
+
+  if (state.previewSceneJumpOffset > 0 || state.previewSceneJumpVelocity !== 0) {
+    state.previewSceneJumpOffset = Math.max(0, state.previewSceneJumpOffset + state.previewSceneJumpVelocity * deltaSeconds);
+    state.previewSceneJumpVelocity -= PREVIEW_SCENE_GRAVITY * deltaSeconds;
+
+    if (state.previewSceneJumpOffset === 0 && state.previewSceneJumpVelocity < 0) {
+      state.previewSceneJumpVelocity = 0;
+    }
+  }
+}
+
+function isPreviewSceneGrounded() {
+  return state.previewSceneJumpOffset === 0 && state.previewSceneJumpVelocity === 0;
+}
+
+function syncPreviewRuntimeActionState() {
+  const availableActionIds = getPreviewRuntimeAvailableActionIds();
+  if (availableActionIds.length === 0) {
+    return;
+  }
+
+  if (!isPreviewSceneGrounded() && state.previewRuntimeLockedActionId) {
+    state.previewRuntimeLockedActionId = null;
+    state.previewRuntimeCompleted = false;
+  }
+
+  if (state.previewRuntimeLockedActionId && state.previewRuntimeCompleted) {
+    state.previewRuntimeLockedActionId = null;
+  }
+
+  const horizontalInput = Number(state.previewSceneKeys.right) - Number(state.previewSceneKeys.left);
+  const nextRuntimeAction = resolvePreviewRuntimeAction({
+    availableActionIds,
+    fallbackActionId: getPreviewRuntimeFallbackActionId(),
+    lockedActionId: state.previewRuntimeLockedActionId,
+    pendingActionId: state.previewRuntimePendingActionId,
+    isGrounded: isPreviewSceneGrounded(),
+    jumpVelocity: state.previewSceneJumpVelocity,
+    horizontalInput,
+    sprintPressed: state.previewSceneModifiers.sprint,
+    crouchPressed: state.previewSceneModifiers.crouch,
+  });
+
+  const previousActionId = state.previewRuntimeActionId;
+  setPreviewRuntimeAction(nextRuntimeAction.actionId, nextRuntimeAction.mode);
+
+  if (state.previewRuntimeActionId === nextRuntimeAction.actionId) {
+    if (nextRuntimeAction.consumePendingAction) {
+      state.previewRuntimePendingActionId = null;
+    }
+
+    if (
+      previousActionId !== state.previewRuntimeActionId &&
+      isOneShotPreviewAction(state.previewRuntimeActionId)
+    ) {
+      state.previewRuntimeLockedActionId = state.previewRuntimeActionId;
+    }
+  }
+}
+
+function updatePreviewRuntimePlayback(timestamp) {
+  const runtimeAsset = getCurrentRuntimePreviewAsset();
+  if (!runtimeAsset || !Array.isArray(runtimeAsset.atlas?.frames) || runtimeAsset.atlas.frames.length === 0) {
+    return;
+  }
+
+  if (state.previewPaused) {
+    state.previewRuntimeLastTick = 0;
+    return;
+  }
+
+  const stepMs = 1000 / state.previewFps;
+  const frameCount = runtimeAsset.atlas.frames.length;
+  const isLoop = Boolean(runtimeAsset.atlas.meta?.loop);
+
+  if (state.previewRuntimeLastTick === 0) {
+    state.previewRuntimeLastTick = timestamp;
+    state.previewRuntimeFrameIndex = clamp(state.previewRuntimeFrameIndex, 0, frameCount - 1);
+    return;
+  }
+
+  if (timestamp - state.previewRuntimeLastTick < stepMs) {
+    return;
+  }
+
+  state.previewRuntimeLastTick = timestamp;
+
+  if (isLoop) {
+    state.previewRuntimeFrameIndex = state.previewRuntimeFrameIndex >= frameCount - 1 ? 0 : state.previewRuntimeFrameIndex + 1;
+    state.previewRuntimeCompleted = false;
+    return;
+  }
+
+  if (state.previewRuntimeFrameIndex >= frameCount - 1) {
+    state.previewRuntimeFrameIndex = frameCount - 1;
+    state.previewRuntimeCompleted = true;
+    return;
+  }
+
+  state.previewRuntimeFrameIndex += 1;
+  state.previewRuntimeCompleted = state.previewRuntimeFrameIndex >= frameCount - 1;
+}
+
+function drawContainedPreviewFrame(context, canvas, image, source, options = {}) {
+  if (!image || !source?.w || !source?.h) {
+    return null;
+  }
+
+  const padding = options.padding ?? 0;
+  const maxWidth = Math.max(canvas.width - padding * 2, 1);
+  const maxHeight = Math.max(canvas.height - padding * 2, 1);
+  const scale = Math.min(maxWidth / source.w, maxHeight / source.h);
+  const drawWidth = source.w * scale;
+  const drawHeight = source.h * scale;
+  const x =
+    options.centerX != null ? options.centerX - drawWidth / 2 : options.x != null ? options.x : (canvas.width - drawWidth) / 2;
+  const y =
+    options.bottom != null
+      ? options.bottom - drawHeight
+      : options.y != null
+        ? options.y
+        : (canvas.height - drawHeight) / 2;
+
+  if (!options.onlyMeasure) {
+    context.save();
+    if (options.flipX) {
+      context.scale(-1, 1);
+      context.drawImage(image, source.x, source.y, source.w, source.h, -(x + drawWidth), y, drawWidth, drawHeight);
+    } else {
+      context.drawImage(image, source.x, source.y, source.w, source.h, x, y, drawWidth, drawHeight);
+    }
+    context.restore();
+  }
+  return { x, y, width: drawWidth, height: drawHeight };
+}
+
+function clearPreviewSurfaces() {
+  previewContext.clearRect(0, 0, elements.previewCanvas.width, elements.previewCanvas.height);
+  previewCompareContext.clearRect(0, 0, elements.previewCompareCanvas.width, elements.previewCompareCanvas.height);
+  previewSceneContext.clearRect(0, 0, elements.previewSceneCanvas.width, elements.previewSceneCanvas.height);
+  previewSheetContext.clearRect(0, 0, elements.previewSheetCanvas.width, elements.previewSheetCanvas.height);
+}
+
+function drawPreviewSceneProps(context, scene, width, floorTop, cameraX) {
+  const spacing = scene.propKind === "pillar" ? 210 : 170;
+  const baseOffset = (cameraX * 0.42) % spacing;
+
+  context.fillStyle = scene.propColor;
+
+  for (let x = -baseOffset - 48; x < width + spacing; x += spacing) {
+    if (scene.propKind === "shrub") {
+      context.beginPath();
+      context.arc(x + 36, floorTop + 22, 16, 0, Math.PI * 2);
+      context.arc(x + 56, floorTop + 16, 20, 0, Math.PI * 2);
+      context.arc(x + 78, floorTop + 24, 14, 0, Math.PI * 2);
+      context.fill();
+      continue;
+    }
+
+    if (scene.propKind === "cactus") {
+      context.fillRect(x + 40, floorTop - 20, 16, 58);
+      context.fillRect(x + 24, floorTop, 12, 24);
+      context.fillRect(x + 60, floorTop - 6, 12, 28);
+      continue;
+    }
+
+    if (scene.propKind === "pillar") {
+      context.fillRect(x + 42, floorTop - 52, 22, 88);
+      context.fillRect(x + 34, floorTop - 56, 38, 10);
+      context.fillRect(x + 36, floorTop + 26, 34, 10);
+      context.fillStyle = "rgba(38, 47, 58, 0.38)";
+      context.fillRect(x + 47, floorTop - 18, 2, 24);
+      context.fillRect(x + 55, floorTop + 4, 2, 18);
+      context.fillStyle = scene.propColor;
+      continue;
+    }
+
+    if (scene.propKind === "pine") {
+      context.beginPath();
+      context.moveTo(x + 44, floorTop - 44);
+      context.lineTo(x + 20, floorTop + 12);
+      context.lineTo(x + 68, floorTop + 12);
+      context.closePath();
+      context.fill();
+      context.beginPath();
+      context.moveTo(x + 44, floorTop - 70);
+      context.lineTo(x + 24, floorTop - 10);
+      context.lineTo(x + 64, floorTop - 10);
+      context.closePath();
+      context.fill();
+      context.fillRect(x + 40, floorTop + 12, 8, 26);
+    }
+  }
+}
+
+function drawPreviewScene() {
+  const canvas = elements.previewSceneCanvas;
+  const context = previewSceneContext;
+  const scene = getPreviewScene();
+  const runtimeFrame = getCurrentRuntimePreviewFrame();
+  const width = canvas.width;
+  const height = canvas.height;
+  const horizon = height * 0.58;
+  const floorTop = height * 0.76;
+  const baseY = clamp(height * state.previewSceneBaseYRatio, floorTop - 68, floorTop + 20);
+  const cameraX = clamp(state.previewScenePlayerX - width * 0.34, 0, PREVIEW_SCENE_WORLD_WIDTH - width * 0.4);
+  const laneOffset = (cameraX * 0.7) % 96;
+  const spriteCenterX = clamp(state.previewScenePlayerX - cameraX, width * 0.2, width * 0.74);
+
+  context.clearRect(0, 0, width, height);
+
+  const skyGradient = context.createLinearGradient(0, 0, 0, height);
+  skyGradient.addColorStop(0, scene.skyTop);
+  skyGradient.addColorStop(0.45, scene.skyMid);
+  skyGradient.addColorStop(1, scene.skyBottom);
+  context.fillStyle = skyGradient;
+  context.fillRect(0, 0, width, height);
+
+  if (scene.id === "moonkeep") {
+    context.fillStyle = "rgba(220, 230, 255, 0.55)";
+    for (let index = 0; index < 14; index += 1) {
+      const starX = ((index * 91) + 40) % width;
+      const starY = 46 + ((index * 37) % 150);
+      context.fillRect(starX, starY, 2, 2);
+    }
+  }
+
+  context.fillStyle = scene.orbColor;
+  context.beginPath();
+  context.arc(width * scene.orbX, height * scene.orbY, height * scene.orbRadius, 0, Math.PI * 2);
+  context.fill();
+
+  context.fillStyle = scene.ridgeColor;
+  context.beginPath();
+  context.moveTo(0, height);
+  context.lineTo(0, horizon);
+  context.quadraticCurveTo(width * 0.12, horizon - (scene.id === "dunes" ? 40 : 82), width * 0.32, horizon - 18);
+  context.quadraticCurveTo(width * 0.52, horizon + (scene.id === "dunes" ? 52 : 30), width * 0.72, horizon - 24);
+  context.quadraticCurveTo(width * 0.88, horizon - (scene.id === "moonkeep" ? 86 : 62), width, horizon + 10);
+  context.lineTo(width, height);
+  context.closePath();
+  context.fill();
+
+  context.fillStyle = scene.hillColor;
+  context.beginPath();
+  context.moveTo(0, height);
+  context.lineTo(0, floorTop - 54);
+  context.quadraticCurveTo(width * 0.18, floorTop - (scene.id === "ruins" ? 82 : 110), width * 0.38, floorTop - 26);
+  context.quadraticCurveTo(width * 0.62, floorTop + 32, width * 0.82, floorTop - (scene.id === "dunes" ? 20 : 42));
+  context.quadraticCurveTo(width * 0.92, floorTop - 80, width, floorTop - 14);
+  context.lineTo(width, height);
+  context.closePath();
+  context.fill();
+
+  const floorGradient = context.createLinearGradient(0, floorTop, 0, height);
+  floorGradient.addColorStop(0, scene.groundTop);
+  floorGradient.addColorStop(1, scene.groundBottom);
+  context.fillStyle = floorGradient;
+  context.fillRect(0, floorTop, width, height - floorTop);
+
+  context.strokeStyle = scene.laneColor;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(0, floorTop + 1);
+  context.lineTo(width, floorTop + 1);
+  context.stroke();
+
+  context.save();
+  context.beginPath();
+  context.rect(0, floorTop, width, height - floorTop);
+  context.clip();
+  context.fillStyle = scene.laneColor;
+  for (let x = -laneOffset; x < width + 120; x += 96) {
+    context.fillRect(x, floorTop + 32, 48, 6);
+  }
+  context.fillStyle = scene.stripColor;
+  for (let x = -laneOffset * 0.6; x < width + 200; x += 142) {
+    context.fillRect(x, floorTop + 12, 84, 18);
+  }
+  context.restore();
+
+  drawPreviewSceneProps(context, scene, width, floorTop, cameraX);
+
+  if (!runtimeFrame?.frame?.frame) {
+    return;
+  }
+
+  const placement = drawContainedPreviewFrame(context, canvas, runtimeFrame.asset.image, runtimeFrame.frame.frame, {
+    padding: 48,
+    centerX: spriteCenterX,
+    bottom: baseY - state.previewSceneJumpOffset,
+    onlyMeasure: true,
+  });
+
+  if (placement) {
+    context.fillStyle = "rgba(11, 16, 24, 0.38)";
+    context.beginPath();
+    context.ellipse(placement.x + placement.width / 2, baseY + 12, placement.width * 0.24, 18, 0, 0, Math.PI * 2);
+    context.fill();
+
+    if ((state.previewSceneKeys.left || state.previewSceneKeys.right) && state.previewSceneJumpOffset === 0) {
+      const dustAnchorX = state.previewSceneFacing < 0 ? placement.x + placement.width * 0.78 : placement.x + placement.width * 0.16;
+      const dustBaseY = baseY + 4;
+      context.fillStyle = "rgba(255, 225, 187, 0.14)";
+      for (let index = 0; index < 3; index += 1) {
+        const drift = (laneOffset * 0.14 + index * 20) % 68;
+        const direction = state.previewSceneFacing < 0 ? 1 : -1;
+        context.beginPath();
+        context.arc(dustAnchorX + direction * drift, dustBaseY - index * 10, 4 + index, 0, Math.PI * 2);
+        context.fill();
+      }
+    }
+
+    drawContainedPreviewFrame(context, canvas, runtimeFrame.asset.image, runtimeFrame.frame.frame, {
+      padding: 48,
+      centerX: spriteCenterX,
+      bottom: baseY - state.previewSceneJumpOffset,
+      flipX: state.previewSceneFacing < 0,
+    });
+  }
+}
+
+function drawPreviewSheetOverview(frame) {
+  const canvas = elements.previewSheetCanvas;
+  const context = previewSheetContext;
+  const image = state.previewSheetImage;
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "rgba(14, 19, 29, 0.96)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (!image || !frame?.frame) {
+    return;
+  }
+
+  const padding = 18;
+  const scale = Math.min((canvas.width - padding * 2) / image.width, (canvas.height - padding * 2) / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const offsetX = (canvas.width - drawWidth) / 2;
+  const offsetY = (canvas.height - drawHeight) / 2;
+
+  context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+
+  context.strokeStyle = "rgba(216, 161, 93, 0.96)";
+  context.lineWidth = 3;
+  context.strokeRect(
+    offsetX + frame.frame.x * scale,
+    offsetY + frame.frame.y * scale,
+    frame.frame.w * scale,
+    frame.frame.h * scale,
+  );
+}
+
+function drawCurrentPreviewFrame() {
+  if (!state.previewSheetImage || !state.previewAtlas || !state.activePreview) {
+    clearPreviewSurfaces();
+    renderPreviewControls();
+    return;
+  }
+
+  const frame = getCurrentPreviewFrame();
   if (!frame) {
     return;
   }
 
-  const { frame: source } = frame;
-  previewContext.clearRect(0, 0, elements.previewCanvas.width, elements.previewCanvas.height);
-  previewContext.drawImage(
-    state.previewSheetImage,
-    source.x,
-    source.y,
-    source.w,
-    source.h,
-    0,
-    0,
-    elements.previewCanvas.width,
-    elements.previewCanvas.height,
-  );
+  drawAssetFrameToCanvas({
+    canvas: elements.previewCanvas,
+    context: previewContext,
+    detail: state.activePreview,
+    atlas: state.previewAtlas,
+    image: state.previewSheetImage,
+    frameIndex: state.previewFrameIndex,
+  });
+
+  const compareSheet = getPreviewCompareSheet();
+  const compareAsset = getPreviewCompareAsset();
+  if (compareSheet && compareAsset) {
+    const compareFrameIndex = mapPreviewComparisonFrameIndex(
+      state.previewFrameIndex,
+      getPreviewFrameCount(),
+      Array.isArray(compareAsset.atlas?.frames) ? compareAsset.atlas.frames.length : 0,
+    );
+    drawAssetFrameToCanvas({
+      canvas: elements.previewCompareCanvas,
+      context: previewCompareContext,
+      detail: compareSheet,
+      atlas: compareAsset.atlas,
+      image: compareAsset.image,
+      frameIndex: compareFrameIndex,
+    });
+  } else {
+    setPreviewCanvasSize(
+      elements.previewCompareCanvas,
+      compareSheet?.frameWidth || state.activePreview.frameWidth || 320,
+      compareSheet?.frameHeight || state.activePreview.frameHeight || 400,
+    );
+    previewCompareContext.clearRect(0, 0, elements.previewCompareCanvas.width, elements.previewCompareCanvas.height);
+  }
+
+  drawPreviewScene();
+  drawPreviewSheetOverview(frame);
+  renderPreviewControls();
 }
 
 function resetPreview(message = "No generated result yet.") {
@@ -979,62 +2939,123 @@ function resetPreview(message = "No generated result yet.") {
   state.previewLoopEnd = 0;
   state.previewFrameIndex = 0;
   state.previewLastTick = 0;
-  previewContext.clearRect(0, 0, elements.previewCanvas.width, elements.previewCanvas.height);
+  state.previewPaused = false;
+  state.previewCompareId = null;
+  state.previewSceneId = null;
+  state.previewRenderLastTick = 0;
+  clearPreviewSceneKeys();
+  clearPreviewRuntimeState();
+  clearPreviewSurfaces();
   elements.previewMeta.innerHTML = `<p class="muted">${escapeHtml(message)}</p>`;
+  renderPreviewSceneButtons();
+  renderPreviewComparePanel();
   renderPreviewControls();
   renderPreviewPickers();
 }
 
-function drawPreviewFrame(timestamp) {
-  if (!state.previewSheetImage || !state.previewAtlas || !state.activePreview) {
+function startPreviewLoop() {
+  if (!state.previewSheetImage || !state.previewAtlas || !state.activePreview || state.previewTimer) {
     return;
   }
 
-  const loopStart = Math.min(state.previewLoopStart, state.previewLoopEnd);
-  const loopEnd = Math.max(state.previewLoopStart, state.previewLoopEnd);
-  const stepMs = 1000 / state.previewFps;
+  state.previewLastTick = 0;
+  state.previewRenderLastTick = 0;
+  state.previewTimer = requestAnimationFrame(drawPreviewFrame);
+}
 
-  if (state.previewLastTick === 0) {
-    state.previewLastTick = timestamp;
-    state.previewFrameIndex = loopStart;
-  } else if (timestamp - state.previewLastTick >= stepMs) {
-    state.previewLastTick = timestamp;
-    state.previewFrameIndex = state.previewFrameIndex >= loopEnd ? loopStart : state.previewFrameIndex + 1;
+function setPreviewPaused(paused) {
+  state.previewPaused = paused;
+  state.previewLastTick = 0;
+  startPreviewLoop();
+  renderPreviewControls();
+  drawCurrentPreviewFrame();
+}
+
+function drawPreviewFrame(timestamp) {
+  if (!state.previewSheetImage || !state.previewAtlas || !state.activePreview) {
+    state.previewTimer = null;
+    return;
+  }
+
+  const deltaSeconds =
+    state.previewRenderLastTick === 0 ? 1 / 60 : clamp((timestamp - state.previewRenderLastTick) / 1000, 1 / 240, 0.05);
+  state.previewRenderLastTick = timestamp;
+
+  updatePreviewSceneState(deltaSeconds);
+  syncPreviewRuntimeActionState();
+  updatePreviewRuntimePlayback(timestamp);
+
+  if (state.previewPaused) {
+    state.previewLastTick = 0;
+  } else {
+    const { loopStart, loopEnd } = getPreviewLoopBounds();
+    const stepMs = 1000 / state.previewFps;
+
+    if (state.previewLastTick === 0) {
+      state.previewLastTick = timestamp;
+      if (state.previewFrameIndex < loopStart || state.previewFrameIndex > loopEnd) {
+        state.previewFrameIndex = loopStart;
+      }
+    } else if (timestamp - state.previewLastTick >= stepMs) {
+      state.previewLastTick = timestamp;
+      state.previewFrameIndex = state.previewFrameIndex >= loopEnd ? loopStart : state.previewFrameIndex + 1;
+    }
   }
 
   drawCurrentPreviewFrame();
   state.previewTimer = requestAnimationFrame(drawPreviewFrame);
 }
 
+function handlePreviewLoadError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  resetPreview(message);
+}
+
 async function loadPreview(spritesheetId) {
-  const detail = await fetchJson(`/api/spritesheets/${spritesheetId}`);
-  const atlas = await fetchJson(detail.atlasUrl);
-  const image = new Image();
+  try {
+    const detail = await fetchJson(`/api/spritesheets/${spritesheetId}`);
+    const atlas = await fetchJson(detail.atlasUrl);
+    if (!Array.isArray(atlas.frames)) {
+      throw new Error("Spritesheet atlas is invalid.");
+    }
+    const image = await loadImageElement(detail.sheetUrl);
 
-  await new Promise((resolve, reject) => {
-    image.onload = resolve;
-    image.onerror = () => reject(new Error("Could not load spritesheet image."));
-    image.src = detail.sheetUrl;
-  });
+    state.activePreview = detail;
+    state.previewSheetImage = image;
+    state.previewAtlas = atlas;
+    state.previewLoopStart = 0;
+    state.previewLoopEnd = Math.max(atlas.frames.length - 1, 0);
+    state.previewFrameIndex = 0;
+    state.previewLastTick = 0;
+    state.previewPaused = false;
+    resetPreviewSceneState({ randomizeScene: true });
+    cachePreviewRuntimeAsset(detail, atlas, image);
+    setPreviewRuntimeAction(detail.kind, detail.kind);
+    primePreviewRuntimeAssets();
+    syncPreviewCompareId();
+    renderPreviewComparePanel();
+    schedulePreviewCompareAssetLoad();
 
-  state.activePreview = detail;
-  state.previewSheetImage = image;
-  state.previewAtlas = atlas;
-  state.previewLoopStart = 0;
-  state.previewLoopEnd = Math.max(atlas.frames.length - 1, 0);
-  state.previewFrameIndex = 0;
-  state.previewLastTick = 0;
+    elements.previewMeta.innerHTML = `
+      <p class="eyebrow">Loaded Result</p>
+      <h3>${escapeHtml(detail.name)} · ${escapeHtml(formatVersionLabel(detail))}</h3>
+      <p class="muted">${detail.frameCount} frames ready for ${atlas.meta?.loop ? "continuous" : "one-shot"} playback.</p>
+      <div class="preview-meta__facts">
+        <span>${escapeHtml(formatFrameDimensions(detail))}</span>
+        <span>${escapeHtml(`${detail.columns} columns`)}</span>
+        <span>${escapeHtml(`${detail.rows} rows`)}</span>
+        <span>${escapeHtml(detail.isSelectedVersion ? "Current export version" : "Preview only")}</span>
+      </div>
+    `;
 
-  elements.previewMeta.innerHTML = `
-    <h3>${escapeHtml(detail.name)}</h3>
-    <p class="muted">${detail.frameCount} frames · ${detail.frameWidth}px · ${atlas.meta.loop ? "loop" : "one-shot"}</p>
-    <p class="muted">${detail.columns} columns · ${detail.rows} rows</p>
-  `;
-
-  renderPreviewPickers();
-  renderPreviewControls();
-  stopPreviewLoop();
-  state.previewTimer = requestAnimationFrame(drawPreviewFrame);
+    renderPreviewSceneButtons();
+    renderPreviewPickers();
+    focusPreviewSceneShell();
+    drawCurrentPreviewFrame();
+    startPreviewLoop();
+  } catch (error) {
+    handlePreviewLoadError(error);
+  }
 }
 
 function syncActionSelectionsFromForm() {
@@ -1068,11 +3089,101 @@ function updatePreviewLoopFromInputs(changedEdge) {
   state.previewLoopEnd = Number(elements.previewRangeEnd.value);
   state.previewFrameIndex = Math.min(state.previewLoopStart, state.previewLoopEnd);
   state.previewLastTick = 0;
-  renderPreviewControls();
   drawCurrentPreviewFrame();
 }
 
+function updatePreviewFrameFromScrub() {
+  if (!state.activePreview || !state.previewAtlas) {
+    return;
+  }
+
+  state.previewFrameIndex = Number(elements.previewFrameScrub.value);
+  state.previewLastTick = 0;
+  setPreviewPaused(true);
+}
+
+function setPreviewScene(sceneId) {
+  if (!PREVIEW_SCENES.some((scene) => scene.id === sceneId)) {
+    return;
+  }
+
+  state.previewSceneId = sceneId;
+  renderPreviewSceneButtons();
+  drawCurrentPreviewFrame();
+}
+
+function isPreviewKeyboardTarget(target) {
+  if (state.currentStage !== "preview" || !state.activePreview) {
+    return false;
+  }
+
+  if (!(target instanceof HTMLElement)) {
+    return true;
+  }
+
+  const tagName = target.tagName;
+  return !["INPUT", "TEXTAREA", "SELECT"].includes(tagName) && !target.isContentEditable;
+}
+
+function getPreviewKeyMapping(key) {
+  if (key === "a" || key === "arrowleft") {
+    return "left";
+  }
+  if (key === "d" || key === "arrowright") {
+    return "right";
+  }
+  if (key === "w" || key === "arrowup") {
+    return "up";
+  }
+  if (key === "s" || key === "arrowdown") {
+    return "down";
+  }
+  return null;
+}
+
+function maybeQueuePreviewModifierAction(modifierKey, actionId) {
+  const availableActionIds = getPreviewRuntimeAvailableActionIds();
+  if (!availableActionIds.includes(actionId)) {
+    return;
+  }
+
+  const horizontalInput = Number(state.previewSceneKeys.right) - Number(state.previewSceneKeys.left);
+  if (horizontalInput === 0 || !isPreviewSceneGrounded()) {
+    return;
+  }
+
+  if (modifierKey === "dash") {
+    queuePreviewRuntimeAction("dash");
+    return;
+  }
+
+  if (modifierKey === "slide") {
+    queuePreviewRuntimeAction("slide");
+  }
+}
+
 document.addEventListener("click", (event) => {
+  const workspaceStageButton = event.target.closest("[data-workspace-stage]");
+  if (workspaceStageButton) {
+    setStage(workspaceStageButton.dataset.workspaceStage, { force: true });
+    return;
+  }
+
+  const workspacePreviewButton = event.target.closest("[data-workspace-preview-current]");
+  if (workspacePreviewButton) {
+    const previewId = workspacePreviewButton.dataset.workspacePreviewCurrent;
+    if (previewId) {
+      setStage("preview", { force: true });
+      void loadPreview(previewId);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-workspace-export-package]")) {
+    triggerCharacterExportDownload();
+    return;
+  }
+
   const stageButton = event.target.closest(".stage-tab[data-stage]");
   if (stageButton) {
     setStage(stageButton.dataset.stage);
@@ -1085,10 +3196,72 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (elements.previewSelectVersion && event.target.closest("#preview-select-version") && state.activePreview) {
+    if (state.activePreview.isSelectedVersion) {
+      setStage("spritesheets");
+    } else {
+      void selectSpritesheetVersion(state.activePreview.id, { openExports: true });
+    }
+    return;
+  }
+
+  if (elements.previewRedoMotion && event.target.closest("#preview-redo-motion") && state.activePreview) {
+    void redoSpritesheetVersion(state.activePreview.id);
+    return;
+  }
+
+  const selectVersionButton = event.target.closest("[data-select-spritesheet-id]");
+  if (selectVersionButton) {
+    void selectSpritesheetVersion(selectVersionButton.dataset.selectSpritesheetId);
+    return;
+  }
+
+  const redoVersionButton = event.target.closest("[data-redo-spritesheet-id]");
+  if (redoVersionButton) {
+    void redoSpritesheetVersion(redoVersionButton.dataset.redoSpritesheetId);
+    return;
+  }
+
+  const previewCompareButton = event.target.closest("[data-preview-compare-id]");
+  if (previewCompareButton) {
+    state.previewCompareId = previewCompareButton.dataset.previewCompareId;
+    renderPreviewComparePanel();
+    schedulePreviewCompareAssetLoad();
+    drawCurrentPreviewFrame();
+    return;
+  }
+
+  const animateMotionButton = event.target.closest("[data-animate-motion-key]");
+  if (animateMotionButton) {
+    state.animateFocusedMotionKey = animateMotionButton.dataset.animateMotionKey || null;
+    renderAnimateConsequencePanel();
+    drawAnimatePreviewFrame();
+    return;
+  }
+
   const previewButton = event.target.closest("[data-preview-id]");
   if (previewButton) {
     setStage("preview");
     void loadPreview(previewButton.dataset.previewId);
+    return;
+  }
+
+  const previewToggle = event.target.closest("#preview-play-toggle, #preview-play-toggle-secondary");
+  if (previewToggle) {
+    setPreviewPaused(!state.previewPaused);
+    focusPreviewSceneShell();
+    return;
+  }
+
+  const sceneButton = event.target.closest("[data-preview-scene-id]");
+  if (sceneButton) {
+    setPreviewScene(sceneButton.dataset.previewSceneId);
+    focusPreviewSceneShell();
+    return;
+  }
+
+  if (event.target.closest("#preview-scene-shell")) {
+    focusPreviewSceneShell();
     return;
   }
 
@@ -1105,6 +3278,24 @@ document.addEventListener("click", (event) => {
 
   if (elements.previewToExports && event.target.closest("#preview-to-exports")) {
     setStage("spritesheets");
+    return;
+  }
+
+  if (
+    (elements.previewDownloadPackage && event.target.closest("#preview-download-package")) ||
+    (elements.exportsDownloadPackage && event.target.closest("#exports-download-package"))
+  ) {
+    triggerCharacterExportDownload();
+    return;
+  }
+
+  if (elements.animateOpenPreview && event.target.closest("#animate-open-preview")) {
+    const previewId = elements.animateOpenPreview.dataset.previewId;
+    if (previewId) {
+      setStage("preview");
+      void loadPreview(previewId);
+    }
+    return;
   }
 });
 
@@ -1127,15 +3318,121 @@ elements.previewRangeEnd.addEventListener("input", () => {
   updatePreviewLoopFromInputs("end");
 });
 
+elements.previewFrameScrub.addEventListener("input", () => {
+  updatePreviewFrameFromScrub();
+});
+
 elements.previewFps.addEventListener("input", () => {
   state.previewFps = Number(elements.previewFps.value);
   renderPreviewControls();
 });
 
+window.addEventListener("keydown", (event) => {
+  if (!isPreviewKeyboardTarget(event.target)) {
+    return;
+  }
+
+  const normalizedKey = event.key.toLowerCase();
+  const mappedKey = getPreviewKeyMapping(normalizedKey);
+
+  if (normalizedKey === "shift") {
+    event.preventDefault();
+    state.previewSceneModifiers.sprint = true;
+    if (!event.repeat) {
+      maybeQueuePreviewModifierAction("dash", "dash");
+    }
+    startPreviewLoop();
+    return;
+  }
+
+  if (normalizedKey === "c") {
+    event.preventDefault();
+    state.previewSceneModifiers.crouch = true;
+    if (!event.repeat) {
+      maybeQueuePreviewModifierAction("slide", "slide");
+    }
+    startPreviewLoop();
+    return;
+  }
+
+  if ((normalizedKey === "j" || normalizedKey === "k") && !event.repeat) {
+    if (!getPreviewRuntimeAvailableActionIds().includes("attack")) {
+      return;
+    }
+    event.preventDefault();
+    queuePreviewRuntimeAction("attack");
+    return;
+  }
+
+  if (normalizedKey === "h" && !event.repeat) {
+    if (!getPreviewRuntimeAvailableActionIds().includes("hurt")) {
+      return;
+    }
+    event.preventDefault();
+    queuePreviewRuntimeAction("hurt");
+    return;
+  }
+
+  if (mappedKey) {
+    event.preventDefault();
+    state.previewSceneKeys[mappedKey] = true;
+    if (!event.repeat && (mappedKey === "left" || mappedKey === "right")) {
+      if (state.previewSceneModifiers.sprint) {
+        maybeQueuePreviewModifierAction("dash", "dash");
+      }
+      if (state.previewSceneModifiers.crouch) {
+        maybeQueuePreviewModifierAction("slide", "slide");
+      }
+    }
+    startPreviewLoop();
+    return;
+  }
+
+  if (normalizedKey === " " || normalizedKey === "spacebar" || normalizedKey === "space") {
+    event.preventDefault();
+    if (!event.repeat) {
+      triggerPreviewJump();
+    }
+  }
+});
+
+window.addEventListener("keyup", (event) => {
+  const normalizedKey = event.key.toLowerCase();
+  const mappedKey = getPreviewKeyMapping(normalizedKey);
+
+  if (normalizedKey === "shift") {
+    state.previewSceneModifiers.sprint = false;
+    return;
+  }
+
+  if (normalizedKey === "c") {
+    state.previewSceneModifiers.crouch = false;
+    return;
+  }
+
+  if (!mappedKey) {
+    return;
+  }
+
+  state.previewSceneKeys[mappedKey] = false;
+});
+
+window.addEventListener("blur", () => {
+  clearPreviewSceneKeys();
+});
+
 elements.createForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(elements.createForm);
+  const prompt = String(formData.get("prompt") || "").trim();
+  const imageFile = formData.get("image");
+  const hasImage = imageFile instanceof File && imageFile.size > 0;
+  if (!hasImage && !prompt) {
+    setMessage(elements.createMessage, "Provide a character image or a prompt.", true);
+    return;
+  }
   formData.set("isHumanoid", String(document.querySelector("#is-humanoid").checked));
+  formData.set("renderStyle", "pixel");
   setMessage(elements.createMessage, "Creating character...");
 
   try {
@@ -1147,7 +3444,7 @@ elements.createForm.addEventListener("submit", async (event) => {
     document.querySelector("#is-humanoid").checked = true;
     setMessage(elements.createMessage, `Created ${created.name}.`);
     await loadCharacters();
-    await selectCharacter(created.id);
+    await selectCharacter(created.id, { preferredStage: "animate" });
   } catch (error) {
     setMessage(elements.createMessage, error.message, true);
   }
@@ -1305,6 +3602,7 @@ async function boot() {
   renderPreviewPickers();
   renderSpritesheets();
   renderActionList();
+  renderPreviewSceneButtons();
   renderStageShell();
   setAnimatePanel("select");
   updateCustomFormState();
