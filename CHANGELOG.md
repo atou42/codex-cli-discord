@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-03-31
+
+### Fixed
+- Codex Fast mode now follows the effective Discord setting in non-interactive `codex exec` runs even when the result is off, by explicitly passing `features.fast_mode=false` instead of relying on the CLI default.
+- Fast mode status text now explains that both off states and inherited channel overrides are forwarded to match Codex `/fast`.
+
 ## [0.10.0] - 2026-03-25
 
 ### Added
