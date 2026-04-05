@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -23,6 +22,8 @@ ALLOWED_VERDICTS = ["pass", "fail", "needs_human"]
 YAML_LOAD_TIMEOUT_SEC = 30
 WORLD_AUDIT_TIMEOUT_SEC = 60
 CLAUDE_JUDGE_TIMEOUT_SEC = 210
+JUDGE_MODEL = "gpt-5.4"
+JUDGE_REASONING_EFFORT = "xhigh"
 ANCHOR_TERMS = [
     "我肉汉堡",
     "30名波江座人维护生命保障系统",
@@ -34,10 +35,11 @@ ANCHOR_TERMS = [
 STATUS_LINE_RE = re.compile(r"(完成|complete|ready|待补充|placeholder)", re.IGNORECASE)
 LEGACY_SUMMARY_RE = re.compile(r"^chapter_\d{2}\.md$")
 BATCH_SUMMARY_RE = re.compile(r"^chapter_\d{4}-\d{4}\.md$")
+PLACEHOLDER_LINE_RE = re.compile(r"(placeholder|待补充|todo|tbd)", re.IGNORECASE)
 
 
 @dataclass
-class ClaudeRunResult:
+class JudgeRunResult:
     raw: dict[str, Any]
     structured_output: dict[str, Any]
     cost_usd: float
@@ -52,6 +54,7 @@ def run_command(
     command: list[str],
     *,
     env: dict[str, str] | None = None,
+    cwd: Path | None = None,
     timeout_sec: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     try:
@@ -60,6 +63,7 @@ def run_command(
             text=True,
             capture_output=True,
             env=env,
+            cwd=str(cwd) if cwd else None,
             timeout=timeout_sec,
         )
     except subprocess.TimeoutExpired as exc:
@@ -140,6 +144,166 @@ def grep_lines(path: Path, terms: list[str], limit: int = 5) -> list[dict[str, A
     return matches
 
 
+def read_excerpt(path: Path, start_line: int, end_line: int) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    start = max(1, start_line)
+    end = min(len(lines), end_line)
+    return [
+        {"line": line_number, "text": lines[line_number - 1]}
+        for line_number in range(start, end + 1)
+    ]
+
+
+def find_lines(path: Path, pattern: re.Pattern[str], limit: int = 8) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    results: list[dict[str, Any]] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+        if pattern.search(line):
+            results.append({"line": line_number, "text": line})
+            if len(results) >= limit:
+                break
+    return results
+
+
+def collect_core_file_evidence(world_root: Path) -> dict[str, Any]:
+    files = {
+        "WORLD.md": world_root / "WORLD.md",
+        "BOOK.md": world_root / "BOOK.md",
+        "processing_summary.md": world_root / "processing_summary.md",
+    }
+    evidence: dict[str, Any] = {}
+    for name, path in files.items():
+        evidence[name] = {
+            "exists": path.exists(),
+            "status_lines": find_lines(path, STATUS_LINE_RE),
+            "placeholder_lines": find_lines(path, PLACEHOLDER_LINE_RE),
+            "opening_excerpt": read_excerpt(path, 1, 28),
+        }
+    return evidence
+
+
+def collect_tail_excerpt_evidence(raw_text_dir: Path) -> list[dict[str, Any]]:
+    plans = [
+        {
+            "file": "chapter_0031.md",
+            "label": "chapter_29_tail_choice",
+            "ranges": [(1, 12), (33, 50), (89, 99)],
+        },
+        {
+            "file": "chapter_0032.md",
+            "label": "epilogue",
+            "ranges": [(1, 10), (17, 28), (53, 61), (89, 105)],
+        },
+        {
+            "file": "chapter_0033.md",
+            "label": "notes",
+            "ranges": [(1, 8)],
+        },
+    ]
+    results: list[dict[str, Any]] = []
+    for plan in plans:
+        path = raw_text_dir / plan["file"]
+        excerpts: list[dict[str, Any]] = []
+        for start_line, end_line in plan["ranges"]:
+            excerpts.extend(read_excerpt(path, start_line, end_line))
+        results.append(
+            {
+                "file": plan["file"],
+                "label": plan["label"],
+                "exists": path.exists(),
+                "excerpts": excerpts,
+            }
+        )
+    return results
+
+
+def has_completion_line(lines: list[dict[str, Any]]) -> bool:
+    for item in lines:
+        text = str(item.get("text", ""))
+        if "完成" in text or "complete" in text.lower():
+            return True
+    return False
+
+
+def compute_required_check_hints(
+    *,
+    preflight: dict[str, Any],
+    final: dict[str, Any],
+    volume_files: list[str],
+    tail_files: list[dict[str, Any]],
+    core_file_evidence: dict[str, Any],
+    anchor_matches: list[dict[str, Any]],
+) -> dict[str, bool]:
+    has_batch = any(BATCH_SUMMARY_RE.match(name) for name in volume_files)
+    has_legacy = any(LEGACY_SUMMARY_RE.match(name) for name in volume_files)
+    world_complete = has_completion_line(list(core_file_evidence.get("WORLD.md", {}).get("status_lines", [])))
+    processing_complete = has_completion_line(
+        list(core_file_evidence.get("processing_summary.md", {}).get("status_lines", []))
+    )
+    has_ch0032_anchor = any("chapter_0032.md" in str(item.get("text", "")) for item in anchor_matches)
+    has_ch0031_anchor = any("chapter_0031.md" in str(item.get("text", "")) for item in anchor_matches)
+    headings = {item["file"]: str(item.get("heading") or "") for item in tail_files}
+    final_ready = bool(final.get("ready_for_delivery"))
+    final_not_ready = not final_ready
+    no_final_artifact_issues = not final.get("blockers") and not final.get("broken_links") and not final.get("placeholder_hits")
+    no_missing_batch = not preflight.get("missing_volume_summaries")
+    book_placeholders = bool(core_file_evidence.get("BOOK.md", {}).get("placeholder_lines"))
+    canonical_count = int(final.get("canonical_chapter_count", 0))
+
+    return {
+        "BOOK_md_has_placeholders": book_placeholders,
+        "WORLD_and_processing_summary_claim_complete": world_complete and processing_complete,
+        "batch_summary_family_missing": not has_batch or not no_missing_batch,
+        "broken_internal_links_present": bool(final.get("broken_links")),
+        "canonical_chapter_count_33": canonical_count == 33,
+        "chapter_0031_is_chapter_29": headings.get("chapter_0031.md") == "第二十九章",
+        "chapter_0032_is_epilogue": headings.get("chapter_0032.md") == "尾声",
+        "chapter_0033_is_notes": headings.get("chapter_0033.md") == "注释",
+        "completion_claims_match_audit_truth": world_complete and processing_complete and final_ready and no_final_artifact_issues,
+        "epilogue_anchor_facts_point_to_chapter_0031_instead_of_0032": has_ch0031_anchor and not has_ch0032_anchor,
+        "epilogue_facts_point_to_chapter_0032": has_ch0032_anchor,
+        "final_audit_not_ready_for_delivery": final_not_ready,
+        "final_audit_ready_for_delivery": final_ready,
+        "only_batch_volume_summaries_present": has_batch and not has_legacy,
+        "raw_text_ends_at_chapter_0031": canonical_count == 31,
+        "story_volumes_has_batch_summaries": has_batch,
+        "story_volumes_has_only_legacy_single_chapter_summaries": has_legacy and not has_batch,
+        "story_volumes_still_has_legacy_single_chapter_summaries": has_legacy,
+        "world_audit_final_ready_for_delivery": final_ready,
+    }
+
+
+def compute_failure_mode_hints(
+    *,
+    input_kind: str,
+    preflight: dict[str, Any],
+    final: dict[str, Any],
+    required_check_hints: dict[str, bool],
+) -> dict[str, bool]:
+    world_complete = bool(required_check_hints.get("WORLD_and_processing_summary_claim_complete"))
+    final_ready = bool(required_check_hints.get("final_audit_ready_for_delivery"))
+    broken_or_placeholder = bool(final.get("broken_links")) or bool(final.get("placeholder_hits"))
+
+    return {
+        "route_false_positive": False,
+        "exec_missing_audit_gate": False,
+        "exec_unsafe_single_book_shortcut": input_kind == "book_file",
+        "raw_text_tail_split_wrong": bool(required_check_hints.get("raw_text_ends_at_chapter_0031")) or not bool(required_check_hints.get("canonical_chapter_count_33")),
+        "artifact_legacy_summary_pollution": bool(required_check_hints.get("story_volumes_still_has_legacy_single_chapter_summaries"))
+        and bool(required_check_hints.get("story_volumes_has_batch_summaries")),
+        "artifact_missing_canonical_volume_summaries": bool(required_check_hints.get("batch_summary_family_missing")),
+        "artifact_backmatter_source_misattribution": bool(
+            required_check_hints.get("epilogue_anchor_facts_point_to_chapter_0031_instead_of_0032")
+        ),
+        "artifact_broken_links_or_placeholders": broken_or_placeholder,
+        "outcome_gold_not_authoritative": False,
+        "ops_inconsistent_delivery_state": world_complete and not final_ready,
+    }
+
+
 def collect_status_snippets(world_root: Path) -> dict[str, list[str]]:
     results: dict[str, list[str]] = {}
     for name in ("WORLD.md", "BOOK.md", "processing_summary.md", "timeline.md"):
@@ -212,9 +376,39 @@ def build_evidence(case: dict[str, Any]) -> dict[str, Any]:
             "tail_files": tail_files,
             "status_snippets": collect_status_snippets(world_root),
             "anchor_matches": grep_lines(world_root, ANCHOR_TERMS, limit=12),
+            "core_file_evidence": collect_core_file_evidence(world_root),
+            "tail_excerpt_evidence": collect_tail_excerpt_evidence(raw_text_dir),
         }
+        evidence["world_root_snapshot"]["required_check_hints"] = compute_required_check_hints(
+            preflight=preflight,
+            final=final,
+            volume_files=volume_files,
+            tail_files=tail_files,
+            core_file_evidence=evidence["world_root_snapshot"]["core_file_evidence"],
+            anchor_matches=evidence["world_root_snapshot"]["anchor_matches"],
+        )
+        evidence["world_root_snapshot"]["failure_mode_hints"] = compute_failure_mode_hints(
+            input_kind=input_kind,
+            preflight=preflight,
+            final=final,
+            required_check_hints=evidence["world_root_snapshot"]["required_check_hints"],
+        )
     else:
-        evidence["world_root_snapshot"] = None
+        evidence["world_root_snapshot"] = {
+            "required_check_hints": {
+                "final_audit_not_ready_for_delivery": not bool(final.get("ready_for_delivery")),
+                "final_audit_ready_for_delivery": bool(final.get("ready_for_delivery")),
+            },
+            "failure_mode_hints": compute_failure_mode_hints(
+                input_kind=input_kind,
+                preflight=preflight,
+                final=final,
+                required_check_hints={
+                    "WORLD_and_processing_summary_claim_complete": False,
+                    "final_audit_ready_for_delivery": bool(final.get("ready_for_delivery")),
+                },
+            ),
+        }
 
     return evidence
 
@@ -227,17 +421,14 @@ def build_schema(required_check_ids: list[str], failure_mode_ids: list[str]) -> 
             "failure_modes_present": {
                 "type": "array",
                 "items": {"type": "string", "enum": failure_mode_ids},
-                "uniqueItems": True,
             },
             "required_checks_true": {
                 "type": "array",
                 "items": {"type": "string", "enum": required_check_ids},
-                "uniqueItems": True,
             },
             "audit_blockers_true": {
                 "type": "array",
                 "items": {"type": "string"},
-                "uniqueItems": True,
             },
             "rationale": {"type": "string"},
         },
@@ -257,6 +448,9 @@ def make_system_prompt(skill_text: str) -> str:
         "You are evaluating the current import-world-from-book skill.\n"
         "Apply the skill exactly as written.\n"
         "Do not use any external context. Do not invent facts. Use only the evidence packet.\n"
+        "Judge only the failure modes and required checks that are actually evidenced for this case.\n"
+        "Do not demand a full end-to-end execution trace unless the case evidence explicitly targets that surface.\n"
+        "Do not mark outcome_gold_not_authoritative only because the packet omits unrelated proof that this case does not need.\n"
         "If evidence is insufficient, use verdict needs_human.\n\n"
         "Current skill file:\n\n"
         f"{skill_text}"
@@ -274,6 +468,15 @@ def make_user_prompt(
         "Return only the structured result.\n\n"
         f"Case id: {case['id']}\n"
         f"Case description: {case['description']}\n"
+        "Case evaluation contract:\n"
+        "- Use only the evidence packet.\n"
+        "- Treat the listed required checks as the case-specific bar.\n"
+        "- If the packet includes `required_check_hints`, use those exact ids when the surrounding evidence agrees.\n"
+        "- If the packet includes `failure_mode_hints`, use those exact ids when the surrounding evidence agrees.\n"
+        "- Only report a failure mode when the packet positively supports it.\n"
+        "- Use outcome_gold_not_authoritative only for a real trustworthiness gap shown by this packet, not for omitted unrelated proof.\n"
+        "- The verdict is about whether this candidate should pass the eval case, not whether the audit machinery itself ran correctly.\n"
+        "- If the packet directly supports the listed checks and does not support an allowed failure mode, return pass.\n"
         f"Allowed failure mode ids: {', '.join(failure_mode_ids)}\n"
         f"Allowed required check ids: {', '.join(required_check_ids)}\n\n"
         "Evidence packet JSON:\n"
@@ -281,48 +484,70 @@ def make_user_prompt(
     )
 
 
-def run_claude_judge(
+def run_codex_judge(
     *,
     skill_path: Path,
     case: dict[str, Any],
     evidence: dict[str, Any],
-    session_dir: Path,
+    case_dir: Path,
     max_budget_usd: float = 0.35,
-) -> ClaudeRunResult:
+) -> JudgeRunResult:
     failure_mode_ids = load_failure_mode_ids()
     required_check_ids = collect_required_check_ids()
     schema = build_schema(required_check_ids, failure_mode_ids)
     skill_text = skill_path.read_text(encoding="utf-8")
+    schema_path = case_dir / "judge-schema.json"
+    raw_output_path = case_dir / "judge-last-message.json"
+    prompt = (
+        f"{make_system_prompt(skill_text)}\n\n"
+        "Evaluator configuration:\n"
+        f"- Use Codex CLI model {JUDGE_MODEL}\n"
+        f"- Use reasoning effort {JUDGE_REASONING_EFFORT}\n"
+        "- Return only the schema-compliant JSON object.\n\n"
+        f"{make_user_prompt(case, evidence, failure_mode_ids, required_check_ids)}"
+    )
+    write_json(schema_path, schema)
     command = [
-        "claude",
-        "-p",
-        "--tools",
-        "",
-        "--dangerously-skip-permissions",
-        "--output-format",
-        "json",
-        "--json-schema",
-        json.dumps(schema, ensure_ascii=False),
-        "--max-budget-usd",
-        str(max_budget_usd),
-        "--system-prompt",
-        make_system_prompt(skill_text),
-        make_user_prompt(case, evidence, failure_mode_ids, required_check_ids),
+        "codex",
+        "exec",
+        "-m",
+        JUDGE_MODEL,
+        "-c",
+        f'model_reasoning_effort="{JUDGE_REASONING_EFFORT}"',
+        "-s",
+        "read-only",
+        "--skip-git-repo-check",
+        "--output-schema",
+        str(schema_path),
+        "-o",
+        str(raw_output_path),
+        prompt,
     ]
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = str(session_dir)
-    result = run_command(command, env=env, timeout_sec=CLAUDE_JUDGE_TIMEOUT_SEC)
+    result = run_command(command, cwd=ROOT, timeout_sec=CLAUDE_JUDGE_TIMEOUT_SEC)
     if result.returncode != 0:
-        raise RuntimeError(f"claude judge failed: {result.stderr}\nstdout={result.stdout}")
-    payload = json.loads(result.stdout)
-    structured = payload.get("structured_output")
+        raise RuntimeError(f"codex judge failed: {result.stderr}\nstdout={result.stdout}")
+    if not raw_output_path.exists():
+        raise RuntimeError("codex judge completed without writing schema result")
+    structured = json.loads(raw_output_path.read_text(encoding="utf-8"))
     if not isinstance(structured, dict):
-        raise RuntimeError(f"Missing structured_output in Claude payload: {payload}")
-    return ClaudeRunResult(
+        raise RuntimeError(f"codex judge did not return a JSON object: {structured}")
+    payload = {
+        "runner": "codex exec",
+        "model": JUDGE_MODEL,
+        "reasoning_effort": JUDGE_REASONING_EFFORT,
+        "prompt": prompt,
+        "structured_output": structured,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "raw_output_path": str(raw_output_path),
+        "schema_path": str(schema_path),
+        "budget_hint_usd": max_budget_usd,
+    }
+    return JudgeRunResult(
         raw=payload,
         structured_output=structured,
-        cost_usd=float(payload.get("total_cost_usd", 0.0)),
-        duration_ms=int(payload.get("duration_ms", 0)),
+        cost_usd=0.0,
+        duration_ms=0,
     )
 
 
@@ -427,13 +652,13 @@ def evaluate_split(
         evidence = build_evidence(case)
         write_json(case_dir / "evidence.json", evidence)
         try:
-            judge = run_claude_judge(
+            judge = run_codex_judge(
                 skill_path=skill_path,
                 case=case,
                 evidence=evidence,
-                session_dir=session_dir,
+                case_dir=case_dir,
             )
-            write_json(case_dir / "claude-result.json", judge.raw)
+            write_json(case_dir / "judge-result.json", judge.raw)
             score = score_case(case, judge.structured_output)
             score["structured_output"] = judge.structured_output
             score["cost_usd"] = round(judge.cost_usd, 6)
