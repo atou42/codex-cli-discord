@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -25,6 +26,34 @@ DEFAULT_QUICK_SPLITS = ["smoke", "train"]
 DEFAULT_PROMOTION_SPLITS = ["dev", "test", "adversarial"]
 MUTATOR_MODEL = "gpt-5.4"
 MUTATOR_REASONING_EFFORT = "xhigh"
+CHECKPOINT_FAILURE_FAMILIES = [
+    "completion_claim_truth",
+    "book_world_processing_evidence",
+    "tail_boundary_mapping",
+    "epilogue_source_trace",
+    "batch_vs_legacy_summary",
+    "single_book_shortcut",
+    "preflight_blockers",
+    "final_audit_delivery_truth",
+    "broken_links_placeholders",
+    "chapter_sequence_integrity",
+    "parallel_write_ownership",
+    "glossary_entity_authority",
+    "other",
+]
+CHECKPOINT_CHANGE_TACTICS = [
+    "add_required_check",
+    "split_gate",
+    "move_gate_earlier",
+    "tighten_authority_source",
+    "forbid_shortcut_success",
+    "require_cross_artifact_match",
+    "require_file_tree_evidence",
+    "require_per_chapter_mapping",
+    "require_negative_check",
+    "narrow_acceptance_rule",
+    "other",
+]
 GLOBAL_STATE_PATHS = [
     "claude_settings=~/.claude/settings.json",
     "claude_skills=~/.claude/skills",
@@ -148,21 +177,141 @@ def parse_json_list(raw: str) -> list[str]:
     return [str(item) for item in value]
 
 
-def load_mutation_changed_sections(iteration_dir: Path) -> list[str]:
+def normalize_direction_token(text: str) -> str:
+    compact = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    return compact or "unknown"
+
+
+def normalize_direction_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[str] = []
+    for value in values:
+        token = normalize_direction_token(str(value))
+        if token not in normalized:
+            normalized.append(token)
+    return sorted(normalized)
+
+
+def load_mutation_parsed_output(iteration_dir: Path) -> dict[str, Any]:
     mutation_path = iteration_dir / "mutation-result.json"
     if not mutation_path.exists():
-        return []
+        return {}
     try:
         payload = load_json(mutation_path)
     except Exception:
-        return []
+        return {}
     for key in ("parsed_output", "structured_output"):
         value = payload.get(key)
         if isinstance(value, dict):
-            sections = value.get("changed_sections")
-            if isinstance(sections, list):
-                return [str(item) for item in sections]
+            return value
+    return {}
+
+
+def build_direction_summary(parsed: dict[str, Any]) -> dict[str, Any]:
+    failure_family = normalize_direction_token(str(parsed.get("failure_family", "")))
+    change_tactic = normalize_direction_token(str(parsed.get("change_tactic", "")))
+    expected_case_ids = normalize_direction_list(parsed.get("expected_case_ids", []))
+    changed_sections = normalize_direction_list(parsed.get("changed_sections", []))
+    core_payload = {
+        "failure_family": failure_family,
+        "change_tactic": change_tactic,
+        "expected_case_ids": expected_case_ids,
+    }
+    full_payload = {
+        **core_payload,
+        "changed_sections": changed_sections,
+    }
+    return {
+        "failure_family": failure_family,
+        "change_tactic": change_tactic,
+        "expected_case_ids": expected_case_ids,
+        "changed_sections": changed_sections,
+        "core_fingerprint": json.dumps(core_payload, ensure_ascii=False, sort_keys=True),
+        "full_fingerprint": json.dumps(full_payload, ensure_ascii=False, sort_keys=True),
+    }
+
+
+def load_mutation_changed_sections(iteration_dir: Path) -> list[str]:
+    parsed = load_mutation_parsed_output(iteration_dir)
+    sections = parsed.get("changed_sections")
+    if isinstance(sections, list):
+        return [str(item) for item in sections]
     return []
+
+
+def active_checkpoint_rows(rows: list[dict[str, str]]) -> tuple[dict[str, str] | None, list[dict[str, str]]]:
+    latest_keep: dict[str, str] | None = None
+    latest_keep_index = -1
+    for index, row in enumerate(rows):
+        if str(row.get("status", "")).strip() == "keep":
+            latest_keep = row
+            latest_keep_index = index
+    if latest_keep_index < 0:
+        return None, rows
+    return latest_keep, rows[latest_keep_index + 1 :]
+
+
+def blocked_directions_since_latest_keep(
+    *,
+    ledger_path: Path,
+    iterations_dir: Path,
+) -> list[dict[str, Any]]:
+    rows = load_ledger_rows(ledger_path)
+    _, checkpoint_rows = active_checkpoint_rows(rows)
+    blocked: list[dict[str, Any]] = []
+    for row in checkpoint_rows:
+        decision = str(row.get("decision", "")).strip()
+        status = str(row.get("status", "")).strip()
+        if decision != "discard" and status != "discard":
+            continue
+        experiment_id = str(row.get("experiment_id", "")).strip()
+        if not experiment_id:
+            continue
+        parsed = load_mutation_parsed_output(iterations_dir / experiment_id)
+        if not parsed:
+            continue
+        direction = build_direction_summary(parsed)
+        blocked.append(
+            {
+                "experiment_id": experiment_id,
+                "hypothesis": shorten_text(str(parsed.get("hypothesis", "")), limit=320),
+                "failure_family": direction["failure_family"],
+                "change_tactic": direction["change_tactic"],
+                "expected_case_ids": direction["expected_case_ids"],
+                "changed_sections": direction["changed_sections"],
+                "direction_core_fingerprint": direction["core_fingerprint"],
+                "direction_full_fingerprint": direction["full_fingerprint"],
+                "primary_before": row.get("primary_metric_before", ""),
+                "primary_after": row.get("primary_metric_after", ""),
+                "cleared_failure_modes": parse_json_list(str(row.get("cleared_failure_modes", "")))[:6],
+                "new_failure_modes": parse_json_list(str(row.get("new_failure_modes", "")))[:6],
+                "notes": shorten_text(str(row.get("notes", "")), limit=320),
+            }
+        )
+    return blocked
+
+
+def find_blocked_direction_match(
+    candidate_direction: dict[str, Any],
+    blocked_directions: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    candidate_core = candidate_direction.get("core_fingerprint", "")
+    candidate_full = candidate_direction.get("full_fingerprint", "")
+    candidate_cases = candidate_direction.get("expected_case_ids", [])
+    candidate_sections = candidate_direction.get("changed_sections", [])
+    for blocked in blocked_directions:
+        blocked_core = str(blocked.get("direction_core_fingerprint", "")).strip()
+        blocked_full = str(blocked.get("direction_full_fingerprint", "")).strip()
+        if candidate_core and blocked_core and candidate_core == blocked_core:
+            return {"match_type": "core", "blocked": blocked}
+        if candidate_full and blocked_full and candidate_full == blocked_full:
+            return {"match_type": "full", "blocked": blocked}
+        blocked_cases = blocked.get("expected_case_ids", [])
+        blocked_sections = blocked.get("changed_sections", [])
+        if candidate_cases and candidate_cases == blocked_cases and candidate_sections and candidate_sections == blocked_sections:
+            return {"match_type": "legacy_case_and_section", "blocked": blocked}
+    return None
 
 
 def recent_mutation_context(
@@ -173,17 +322,23 @@ def recent_mutation_context(
 ) -> dict[str, Any]:
     rows = load_ledger_rows(ledger_path)
     if not rows:
-        return {"latest_keep": None, "recent_attempts": []}
+        return {"latest_keep": None, "recent_attempts": [], "failed_attempts_since_keep": []}
 
     def row_summary(row: dict[str, str]) -> dict[str, Any]:
         experiment_id = str(row.get("experiment_id", "")).strip()
         iteration_dir = iterations_dir / experiment_id if experiment_id else iterations_dir
+        parsed = load_mutation_parsed_output(iteration_dir)
+        direction = build_direction_summary(parsed) if parsed else {}
         return {
             "experiment_id": experiment_id,
             "status": row.get("status", ""),
             "decision": row.get("decision", ""),
             "hypothesis": shorten_text(str(row.get("hypothesis", "")), limit=320),
             "changed_sections": load_mutation_changed_sections(iteration_dir)[:8],
+            "expected_case_ids": direction.get("expected_case_ids", []),
+            "failure_family": direction.get("failure_family", ""),
+            "change_tactic": direction.get("change_tactic", ""),
+            "direction_core_fingerprint": direction.get("core_fingerprint", ""),
             "primary_before": row.get("primary_metric_before", ""),
             "primary_after": row.get("primary_metric_after", ""),
             "dimension_deltas": row.get("dimension_deltas", ""),
@@ -193,14 +348,19 @@ def recent_mutation_context(
             "keep_commit_hash": row.get("keep_commit_hash", ""),
         }
 
-    latest_keep = None
-    for row in reversed(rows):
-        if str(row.get("status", "")).strip() == "keep":
-            latest_keep = row_summary(row)
-            break
-
+    latest_keep_row, checkpoint_rows = active_checkpoint_rows(rows)
+    latest_keep = row_summary(latest_keep_row) if latest_keep_row else None
     recent_attempts = [row_summary(row) for row in rows[-latest_limit:]]
-    return {"latest_keep": latest_keep, "recent_attempts": recent_attempts}
+    failed_attempts_since_keep = [
+        row_summary(row)
+        for row in checkpoint_rows
+        if str(row.get("decision", "")).strip() == "discard" or str(row.get("status", "")).strip() == "discard"
+    ]
+    return {
+        "latest_keep": latest_keep,
+        "recent_attempts": recent_attempts,
+        "failed_attempts_since_keep": failed_attempts_since_keep[-8:],
+    }
 
 
 def capture_git(repo: Path, output: Path) -> dict[str, Any]:
@@ -495,6 +655,7 @@ def build_mutation_prompt(
     full_failures = compact_failure_items(baseline_full["rollup"]["failing_cases"], limit=6)
     latest_keep = mutation_context.get("latest_keep")
     recent_attempts = mutation_context.get("recent_attempts", [])
+    failed_attempts_since_keep = mutation_context.get("failed_attempts_since_keep", [])
     return (
         f"Rewrite only {TARGET_REL.as_posix()}.\n\n"
         "Goal: improve the fixed Project Hail Mary gold-reference evaluator without changing the harness.\n"
@@ -511,12 +672,21 @@ def build_mutation_prompt(
         f"- Generate the revision as if you are Codex CLI using model {MUTATOR_MODEL} with reasoning effort {MUTATOR_REASONING_EFFORT}.\n"
         "- Read the recent mutation history below before changing anything.\n"
         "- Learn from the latest keep and the latest discards. Do not blindly repeat the same move.\n"
-        "- If the most recent discard regressed a split or introduced new failure modes, avoid repeating that pattern.\n\n"
+        "- If the most recent discard regressed a split or introduced new failure modes, avoid repeating that pattern.\n"
+        "- Active checkpoint rule: since the latest keep, every discarded direction below is blocked.\n"
+        "- Do not return a candidate whose failure_family + change_tactic + expected_case_ids matches a blocked discard from this checkpoint.\n"
+        "- If you revisit the same failure family, choose a materially different change_tactic and explain the difference in checkpoint_guard_explanation.\n\n"
+        "Structured output requirements:\n"
+        f"- failure_family must be one of {json.dumps(CHECKPOINT_FAILURE_FAMILIES, ensure_ascii=False)}.\n"
+        f"- change_tactic must be one of {json.dumps(CHECKPOINT_CHANGE_TACTICS, ensure_ascii=False)}.\n"
+        "- checkpoint_guard_explanation must state why this direction is not the same as the blocked directions in the current checkpoint.\n\n"
         f"Iteration id: {iteration_id}\n"
         "Latest accepted keep:\n"
         f"{json.dumps(latest_keep, ensure_ascii=False, indent=2)}\n\n"
         "Recent mutation attempts:\n"
         f"{json.dumps(recent_attempts, ensure_ascii=False, indent=2)}\n\n"
+        "Blocked discarded directions since latest keep:\n"
+        f"{json.dumps(failed_attempts_since_keep, ensure_ascii=False, indent=2)}\n\n"
         "Current accepted quick-gate failures:\n"
         f"{json.dumps(quick_failures, ensure_ascii=False, indent=2)}\n\n"
         "Current accepted full-suite failures:\n"
@@ -533,15 +703,25 @@ def run_mutation(
     prompt: str,
     output_path: Path,
     max_budget_usd: float,
+    blocked_directions: list[dict[str, Any]],
 ) -> dict[str, Any]:
     target_path = repo / TARGET_REL
     current_skill_text = target_path.read_text(encoding="utf-8")
     schema_path = output_path.with_name("mutation-schema.json")
-    raw_output_path = output_path.with_name("mutation-last-message.json")
+    final_raw_output_path = output_path.with_name("mutation-last-message.json")
     schema = {
         "type": "object",
         "properties": {
             "hypothesis": {"type": "string"},
+            "failure_family": {
+                "type": "string",
+                "enum": CHECKPOINT_FAILURE_FAMILIES,
+            },
+            "change_tactic": {
+                "type": "string",
+                "enum": CHECKPOINT_CHANGE_TACTICS,
+            },
+            "checkpoint_guard_explanation": {"type": "string"},
             "changed_sections": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -554,6 +734,9 @@ def run_mutation(
         },
         "required": [
             "hypothesis",
+            "failure_family",
+            "change_tactic",
+            "checkpoint_guard_explanation",
             "changed_sections",
             "expected_case_ids",
             "revised_skill_md",
@@ -561,38 +744,93 @@ def run_mutation(
         "additionalProperties": False,
     }
     write_json(schema_path, schema)
-    result = run_command(
-        [
-            "codex",
-            "exec",
-            "-m",
-            MUTATOR_MODEL,
-            "-c",
-            f'model_reasoning_effort="{MUTATOR_REASONING_EFFORT}"',
-            "-s",
-            "read-only",
-            "--skip-git-repo-check",
-            "--output-schema",
-            str(schema_path),
-            "-o",
-            str(raw_output_path),
-            prompt,
-        ],
-        cwd=repo,
-        check=False,
-        timeout_sec=420,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            "Mutation run failed.\n"
-            f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+    collision_feedback: list[str] = []
+    attempts: list[dict[str, Any]] = []
+    accepted_structured: dict[str, Any] | None = None
+    accepted_result: subprocess.CompletedProcess[str] | None = None
+    accepted_raw_output_path: Path | None = None
+    accepted_direction: dict[str, Any] | None = None
+    for attempt_index in range(1, 4):
+        attempt_prompt = prompt
+        if collision_feedback:
+            attempt_prompt += (
+                "\n\nCheckpoint collision feedback:\n"
+                + "\n".join(f"- {item}" for item in collision_feedback)
+                + "\nGenerate a materially different candidate."
+            )
+        attempt_raw_output_path = output_path.with_name(f"mutation-last-message.attempt-{attempt_index:02d}.json")
+        result = run_command(
+            [
+                "codex",
+                "exec",
+                "-m",
+                MUTATOR_MODEL,
+                "-c",
+                f'model_reasoning_effort="{MUTATOR_REASONING_EFFORT}"',
+                "-s",
+                "read-only",
+                "--skip-git-repo-check",
+                "--output-schema",
+                str(schema_path),
+                "-o",
+                str(attempt_raw_output_path),
+                attempt_prompt,
+            ],
+            cwd=repo,
+            check=False,
+            timeout_sec=420,
         )
-    if not raw_output_path.exists():
-        raise RuntimeError("Mutation run completed without writing output schema result")
-    structured = json.loads(raw_output_path.read_text(encoding="utf-8"))
-    if not isinstance(structured, dict):
-        raise RuntimeError(f"Mutation output is not a JSON object: {structured}")
-    revised_skill_md = str(structured.get("revised_skill_md", ""))
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Mutation run failed.\n"
+                f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+            )
+        if not attempt_raw_output_path.exists():
+            raise RuntimeError("Mutation run completed without writing output schema result")
+        structured = json.loads(attempt_raw_output_path.read_text(encoding="utf-8"))
+        if not isinstance(structured, dict):
+            raise RuntimeError(f"Mutation output is not a JSON object: {structured}")
+        direction = build_direction_summary(structured)
+        blocked_match = find_blocked_direction_match(direction, blocked_directions)
+        attempts.append(
+            {
+                "attempt_index": attempt_index,
+                "parsed_output": structured,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "raw_output_path": str(attempt_raw_output_path),
+                "direction": direction,
+            }
+        )
+        if blocked_match:
+            blocked = blocked_match["blocked"]
+            collision_feedback.append(
+                "candidate collided with blocked discard "
+                + json.dumps(
+                    {
+                        "match_type": blocked_match["match_type"],
+                        "blocked_experiment_id": blocked.get("experiment_id", ""),
+                        "blocked_failure_family": blocked.get("failure_family", ""),
+                        "blocked_change_tactic": blocked.get("change_tactic", ""),
+                        "blocked_expected_case_ids": blocked.get("expected_case_ids", []),
+                        "blocked_notes": blocked.get("notes", ""),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            continue
+        accepted_structured = structured
+        accepted_result = result
+        accepted_raw_output_path = attempt_raw_output_path
+        accepted_direction = direction
+        break
+    if accepted_structured is None or accepted_result is None or accepted_raw_output_path is None or accepted_direction is None:
+        raise RuntimeError(
+            "Mutation candidate repeatedly collided with blocked checkpoint directions.\n"
+            + "\n".join(collision_feedback)
+        )
+    shutil.copyfile(accepted_raw_output_path, final_raw_output_path)
+    revised_skill_md = str(accepted_structured.get("revised_skill_md", ""))
     if not revised_skill_md.strip():
         raise RuntimeError("Mutation output returned empty revised_skill_md")
     if revised_skill_md.rstrip() != current_skill_text.rstrip():
@@ -602,11 +840,15 @@ def run_mutation(
         "model": MUTATOR_MODEL,
         "reasoning_effort": MUTATOR_REASONING_EFFORT,
         "prompt": prompt,
-        "parsed_output": structured,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-        "raw_output_path": str(raw_output_path),
+        "parsed_output": accepted_structured,
+        "direction": accepted_direction,
+        "stdout": accepted_result.stdout,
+        "stderr": accepted_result.stderr,
+        "raw_output_path": str(final_raw_output_path),
         "schema_path": str(schema_path),
+        "blocked_directions": blocked_directions,
+        "collision_feedback": collision_feedback,
+        "attempts": attempts,
     }
     write_json(output_path, payload)
     return payload
@@ -1098,15 +1340,20 @@ def main() -> int:
         model_before = capture_model(session_dir, model_before_path)
         global_before = capture_global_state(global_before_path)
 
+        mutation_context = recent_mutation_context(
+            ledger_path=RUN_ROOT / "experiment-ledger.tsv",
+            iterations_dir=iterations_dir,
+        )
+        blocked_directions = blocked_directions_since_latest_keep(
+            ledger_path=RUN_ROOT / "experiment-ledger.tsv",
+            iterations_dir=iterations_dir,
+        )
         prompt = build_mutation_prompt(
             iteration_id=experiment_id,
             baseline_quick=accepted_quick_before,
             baseline_full=accepted_full_before,
             current_skill_text=(worktree / TARGET_REL).read_text(encoding="utf-8"),
-            mutation_context=recent_mutation_context(
-                ledger_path=RUN_ROOT / "experiment-ledger.tsv",
-                iterations_dir=iterations_dir,
-            ),
+            mutation_context=mutation_context,
         )
         write_text(mutation_prompt_path, prompt)
         print(f"[{experiment_id}] mutate SKILL.md", flush=True)
@@ -1131,6 +1378,7 @@ def main() -> int:
                 prompt=prompt,
                 output_path=mutation_result_path,
                 max_budget_usd=args.mutator_max_budget_usd,
+                blocked_directions=blocked_directions,
             )
             parsed = mutation_json.get("parsed_output") if mutation_json else None
             if isinstance(parsed, dict):
