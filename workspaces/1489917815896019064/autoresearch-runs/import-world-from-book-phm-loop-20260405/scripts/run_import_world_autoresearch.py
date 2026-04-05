@@ -23,6 +23,8 @@ SESSION_DIR = RUN_ROOT / "runtime" / "loop-claude-session"
 TARGET_REL = Path("skills/import-world-from-book/SKILL.md")
 DEFAULT_QUICK_SPLITS = ["smoke", "train"]
 DEFAULT_PROMOTION_SPLITS = ["dev", "test", "adversarial"]
+MUTATOR_MODEL = "gpt-5.4"
+MUTATOR_REASONING_EFFORT = "xhigh"
 GLOBAL_STATE_PATHS = [
     "claude_settings=~/.claude/settings.json",
     "claude_skills=~/.claude/skills",
@@ -125,6 +127,80 @@ def load_ledger_rows(path: Path) -> list[dict[str, str]]:
         return []
     with path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle, fieldnames=LEDGER_COLUMNS, delimiter="\t"))[1:]
+
+
+def shorten_text(text: str, limit: int = 280) -> str:
+    compact = normalize_note(text)
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
+
+
+def parse_json_list(raw: str) -> list[str]:
+    if not raw.strip():
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def load_mutation_changed_sections(iteration_dir: Path) -> list[str]:
+    mutation_path = iteration_dir / "mutation-result.json"
+    if not mutation_path.exists():
+        return []
+    try:
+        payload = load_json(mutation_path)
+    except Exception:
+        return []
+    for key in ("parsed_output", "structured_output"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            sections = value.get("changed_sections")
+            if isinstance(sections, list):
+                return [str(item) for item in sections]
+    return []
+
+
+def recent_mutation_context(
+    *,
+    ledger_path: Path,
+    iterations_dir: Path,
+    latest_limit: int = 3,
+) -> dict[str, Any]:
+    rows = load_ledger_rows(ledger_path)
+    if not rows:
+        return {"latest_keep": None, "recent_attempts": []}
+
+    def row_summary(row: dict[str, str]) -> dict[str, Any]:
+        experiment_id = str(row.get("experiment_id", "")).strip()
+        iteration_dir = iterations_dir / experiment_id if experiment_id else iterations_dir
+        return {
+            "experiment_id": experiment_id,
+            "status": row.get("status", ""),
+            "decision": row.get("decision", ""),
+            "hypothesis": shorten_text(str(row.get("hypothesis", "")), limit=320),
+            "changed_sections": load_mutation_changed_sections(iteration_dir)[:8],
+            "primary_before": row.get("primary_metric_before", ""),
+            "primary_after": row.get("primary_metric_after", ""),
+            "dimension_deltas": row.get("dimension_deltas", ""),
+            "cleared_failure_modes": parse_json_list(str(row.get("cleared_failure_modes", "")))[:6],
+            "new_failure_modes": parse_json_list(str(row.get("new_failure_modes", "")))[:6],
+            "notes": shorten_text(str(row.get("notes", "")), limit=320),
+            "keep_commit_hash": row.get("keep_commit_hash", ""),
+        }
+
+    latest_keep = None
+    for row in reversed(rows):
+        if str(row.get("status", "")).strip() == "keep":
+            latest_keep = row_summary(row)
+            break
+
+    recent_attempts = [row_summary(row) for row in rows[-latest_limit:]]
+    return {"latest_keep": latest_keep, "recent_attempts": recent_attempts}
 
 
 def capture_git(repo: Path, output: Path) -> dict[str, Any]:
@@ -413,9 +489,12 @@ def build_mutation_prompt(
     baseline_quick: dict[str, Any],
     baseline_full: dict[str, Any],
     current_skill_text: str,
+    mutation_context: dict[str, Any],
 ) -> str:
     quick_failures = compact_failure_items(baseline_quick["rollup"]["failing_cases"], limit=4)
     full_failures = compact_failure_items(baseline_full["rollup"]["failing_cases"], limit=6)
+    latest_keep = mutation_context.get("latest_keep")
+    recent_attempts = mutation_context.get("recent_attempts", [])
     return (
         f"Rewrite only {TARGET_REL.as_posix()}.\n\n"
         "Goal: improve the fixed Project Hail Mary gold-reference evaluator without changing the harness.\n"
@@ -428,7 +507,16 @@ def build_mutation_prompt(
         "force explicit evidence for WORLD.md, processing_summary.md, BOOK.md, and final-audit readiness. "
         "Do not let tail-boundary checks collapse into filename-only checks; force explicit 0031/0032/0033 role mapping plus epilogue-anchor source checks. "
         "Do not let presence of batch summaries hide legacy-summary pollution; require separate existence checks for batch family, legacy family, and missing batch family.\n\n"
+        "Mutation authoring requirements:\n"
+        f"- Generate the revision as if you are Codex CLI using model {MUTATOR_MODEL} with reasoning effort {MUTATOR_REASONING_EFFORT}.\n"
+        "- Read the recent mutation history below before changing anything.\n"
+        "- Learn from the latest keep and the latest discards. Do not blindly repeat the same move.\n"
+        "- If the most recent discard regressed a split or introduced new failure modes, avoid repeating that pattern.\n\n"
         f"Iteration id: {iteration_id}\n"
+        "Latest accepted keep:\n"
+        f"{json.dumps(latest_keep, ensure_ascii=False, indent=2)}\n\n"
+        "Recent mutation attempts:\n"
+        f"{json.dumps(recent_attempts, ensure_ascii=False, indent=2)}\n\n"
         "Current accepted quick-gate failures:\n"
         f"{json.dumps(quick_failures, ensure_ascii=False, indent=2)}\n\n"
         "Current accepted full-suite failures:\n"
@@ -442,15 +530,14 @@ def build_mutation_prompt(
 def run_mutation(
     *,
     repo: Path,
-    session_dir: Path,
     prompt: str,
     output_path: Path,
     max_budget_usd: float,
 ) -> dict[str, Any]:
     target_path = repo / TARGET_REL
     current_skill_text = target_path.read_text(encoding="utf-8")
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = str(session_dir)
+    schema_path = output_path.with_name("mutation-schema.json")
+    raw_output_path = output_path.with_name("mutation-last-message.json")
     schema = {
         "type": "object",
         "properties": {
@@ -458,12 +545,10 @@ def run_mutation(
             "changed_sections": {
                 "type": "array",
                 "items": {"type": "string"},
-                "uniqueItems": True,
             },
             "expected_case_ids": {
                 "type": "array",
                 "items": {"type": "string"},
-                "uniqueItems": True,
             },
             "revised_skill_md": {"type": "string"},
         },
@@ -475,41 +560,54 @@ def run_mutation(
         ],
         "additionalProperties": False,
     }
+    write_json(schema_path, schema)
     result = run_command(
         [
-            "claude",
-            "-p",
-            "--tools",
-            "",
-            "--dangerously-skip-permissions",
-            "--output-format",
-            "json",
-            "--json-schema",
-            json.dumps(schema, ensure_ascii=False),
-            "--max-budget-usd",
-            str(max_budget_usd),
+            "codex",
+            "exec",
+            "-m",
+            MUTATOR_MODEL,
+            "-c",
+            f'model_reasoning_effort="{MUTATOR_REASONING_EFFORT}"',
+            "-s",
+            "read-only",
+            "--skip-git-repo-check",
+            "--output-schema",
+            str(schema_path),
+            "-o",
+            str(raw_output_path),
             prompt,
         ],
         cwd=repo,
-        env=env,
         check=False,
-        timeout_sec=240,
+        timeout_sec=420,
     )
     if result.returncode != 0:
         raise RuntimeError(
             "Mutation run failed.\n"
             f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
         )
-    payload = json.loads(result.stdout)
-    structured = payload.get("structured_output")
+    if not raw_output_path.exists():
+        raise RuntimeError("Mutation run completed without writing output schema result")
+    structured = json.loads(raw_output_path.read_text(encoding="utf-8"))
     if not isinstance(structured, dict):
-        raise RuntimeError(f"Mutation output missing structured_output: {payload}")
+        raise RuntimeError(f"Mutation output is not a JSON object: {structured}")
     revised_skill_md = str(structured.get("revised_skill_md", ""))
     if not revised_skill_md.strip():
         raise RuntimeError("Mutation output returned empty revised_skill_md")
     if revised_skill_md.rstrip() != current_skill_text.rstrip():
         write_text(target_path, revised_skill_md.rstrip() + "\n")
-    payload["parsed_output"] = structured
+    payload = {
+        "runner": "codex exec",
+        "model": MUTATOR_MODEL,
+        "reasoning_effort": MUTATOR_REASONING_EFFORT,
+        "prompt": prompt,
+        "parsed_output": structured,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "raw_output_path": str(raw_output_path),
+        "schema_path": str(schema_path),
+    }
     write_json(output_path, payload)
     return payload
 
@@ -1005,6 +1103,10 @@ def main() -> int:
             baseline_quick=accepted_quick_before,
             baseline_full=accepted_full_before,
             current_skill_text=(worktree / TARGET_REL).read_text(encoding="utf-8"),
+            mutation_context=recent_mutation_context(
+                ledger_path=RUN_ROOT / "experiment-ledger.tsv",
+                iterations_dir=iterations_dir,
+            ),
         )
         write_text(mutation_prompt_path, prompt)
         print(f"[{experiment_id}] mutate SKILL.md", flush=True)
@@ -1026,7 +1128,6 @@ def main() -> int:
         try:
             mutation_json = run_mutation(
                 repo=worktree,
-                session_dir=session_dir,
                 prompt=prompt,
                 output_path=mutation_result_path,
                 max_budget_usd=args.mutator_max_budget_usd,
