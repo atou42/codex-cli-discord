@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import difflib
 import json
 import os
 import re
@@ -26,6 +27,12 @@ DEFAULT_QUICK_SPLITS = ["smoke", "train"]
 DEFAULT_PROMOTION_SPLITS = ["dev", "test", "adversarial"]
 MUTATOR_MODEL = "gpt-5.4"
 MUTATOR_REASONING_EFFORT = "xhigh"
+MUTATION_TIMEOUT_SEC = 420
+MUTATION_MAX_ATTEMPTS = 3
+PROMPT_RECENT_ATTEMPT_LIMIT = 2
+PROMPT_BLOCKED_ATTEMPT_LIMIT = 6
+PROMPT_CASE_ID_LIMIT = 4
+PROMPT_CHANGED_SECTION_LIMIT = 4
 CHECKPOINT_FAILURE_FAMILIES = [
     "completion_claim_truth",
     "book_world_processing_evidence",
@@ -177,6 +184,13 @@ def parse_json_list(raw: str) -> list[str]:
     return [str(item) for item in value]
 
 
+def parse_json_object(raw: str) -> dict[str, Any]:
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError(f"Mutation output is not a JSON object: {type(value).__name__}")
+    return value
+
+
 def normalize_direction_token(text: str) -> str:
     compact = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
     return compact or "unknown"
@@ -191,6 +205,245 @@ def normalize_direction_list(values: Any) -> list[str]:
         if token not in normalized:
             normalized.append(token)
     return sorted(normalized)
+
+
+def normalize_choice(value: str, allowed: list[str], *, fallback: str = "other") -> str:
+    token = normalize_direction_token(value)
+    if token in allowed:
+        return token
+    return fallback if fallback in allowed else allowed[0]
+
+
+def strip_outer_code_fence(text: str) -> str:
+    stripped = text.strip()
+    match = re.match(r"^```[^\n]*\n([\s\S]*?)\n```$", stripped)
+    if match:
+        return match.group(1).strip()
+    return stripped
+
+
+def parse_key_value_lines(lines: list[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    active_key: str | None = None
+    active_parts: list[str] = []
+    active_style = ""
+
+    def flush() -> None:
+        nonlocal active_key, active_parts, active_style
+        if active_key is not None:
+            if active_style in {"|", "|-"}:
+                parsed[active_key] = "\n".join(part.rstrip() for part in active_parts).strip()
+            else:
+                parsed[active_key] = " ".join(part.strip() for part in active_parts if part.strip()).strip()
+        active_key = None
+        active_parts = []
+        active_style = ""
+
+    for raw_line in lines:
+        line = raw_line.rstrip("\n")
+        if active_key is not None and (line.startswith("  ") or line.startswith("\t")):
+            active_parts.append(line.lstrip())
+            continue
+        flush()
+        match = re.match(r"^([A-Za-z0-9_]+)\s*[:=]\s*(.*)$", line.rstrip())
+        if not match:
+            continue
+        key = match.group(1).strip()
+        value = match.group(2).strip()
+        if value in {"|", "|-", ">", ">-"}:
+            active_key = key
+            active_style = value
+            active_parts = []
+            continue
+        parsed[key] = value.strip().strip('"').strip("'")
+    flush()
+    return parsed
+
+
+def parse_frontmatter_document(text: str) -> tuple[dict[str, str], str] | None:
+    stripped = text.strip()
+    if not stripped.startswith("---"):
+        return None
+    lines = stripped.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    end_index: int | None = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            end_index = index
+            break
+    if end_index is None:
+        return None
+    metadata = parse_key_value_lines(lines[1:end_index])
+    if not metadata:
+        return None
+    return metadata, stripped
+
+
+def parse_prefixed_metadata_document(text: str) -> tuple[dict[str, str], str] | None:
+    stripped = text.strip()
+    lines = stripped.splitlines()
+    metadata_lines: list[str] = []
+    body_start: int | None = None
+    for index, raw_line in enumerate(lines):
+        line = raw_line.rstrip()
+        if not line:
+            if metadata_lines:
+                body_start = index + 1
+                break
+            continue
+        if line.startswith("```") or line == "---":
+            body_start = index
+            break
+        if re.match(r"^[A-Za-z0-9_]+\s*[:=]\s*.*$", line):
+            metadata_lines.append(raw_line)
+            continue
+        if metadata_lines and (raw_line.startswith("  ") or raw_line.startswith("\t")):
+            metadata_lines.append(raw_line)
+            continue
+        if metadata_lines:
+            body_start = index
+            break
+        return None
+    if not metadata_lines:
+        return None
+    metadata = parse_key_value_lines(metadata_lines)
+    if not metadata:
+        return None
+    body_text = "\n".join(lines[body_start:]).strip() if body_start is not None else ""
+    if body_text.startswith("```"):
+        body_text = strip_outer_code_fence(body_text)
+    return metadata, body_text.strip()
+
+
+def nearest_heading(lines: list[str], line_index: int) -> str:
+    if not lines:
+        return "frontmatter"
+    bounded_index = max(0, min(line_index, len(lines) - 1))
+    for index in range(bounded_index, -1, -1):
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", lines[index])
+        if match:
+            return f"{match.group(1)} {match.group(2).strip()}"
+    return "frontmatter"
+
+
+def infer_changed_sections(current_skill_text: str, revised_skill_md: str) -> list[str]:
+    current_lines = current_skill_text.splitlines()
+    revised_lines = revised_skill_md.splitlines()
+    matcher = difflib.SequenceMatcher(a=current_lines, b=revised_lines)
+    sections: list[str] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if j1 == j2:
+            section = nearest_heading(current_lines, max(i1 - 1, 0))
+        else:
+            section = nearest_heading(revised_lines, j1)
+        if section not in sections:
+            sections.append(section)
+    if not sections and current_skill_text.rstrip() != revised_skill_md.rstrip():
+        sections.append("file_root")
+    return sections[:8]
+
+
+def summarize_note_for_prompt(note: str) -> str:
+    compact = normalize_note(note)
+    if not compact:
+        return ""
+    lowered = compact.lower()
+    if "expecting value: line 1 column 1" in lowered:
+        return "mutation output format drifted and was not valid JSON"
+    if "timed out after" in lowered:
+        return "mutation attempt timed out before returning a usable payload"
+    if "reconnecting" in lowered or "high demand" in lowered:
+        return "provider reconnect or high-demand instability"
+    if "quick pass count stayed flat" in lowered:
+        return "quick pass count stayed flat"
+    if "quick pass count did not improve" in lowered:
+        return "quick pass count did not improve"
+    if "smoke pass count regressed" in lowered:
+        return "smoke pass count regressed"
+    if "global claude lane drift detected" in lowered:
+        return "global claude lane drift detected"
+    return shorten_text(compact, limit=140)
+
+
+def compact_prompt_attempt_view(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "experiment_id": item.get("experiment_id", ""),
+        "hypothesis": shorten_text(str(item.get("hypothesis", "")), limit=220),
+        "failure_family": item.get("failure_family", "") or "unknown",
+        "change_tactic": item.get("change_tactic", "") or "unknown",
+        "changed_sections": list(item.get("changed_sections", []))[:PROMPT_CHANGED_SECTION_LIMIT],
+        "expected_case_ids": list(item.get("expected_case_ids", []))[:PROMPT_CASE_ID_LIMIT],
+        "result": summarize_note_for_prompt(str(item.get("notes", ""))),
+        "cleared_failure_modes": list(item.get("cleared_failure_modes", []))[:3],
+        "new_failure_modes": list(item.get("new_failure_modes", []))[:3],
+    }
+
+
+def extract_structured_payload(
+    raw_text: str,
+    *,
+    current_skill_text: str,
+) -> tuple[dict[str, Any], str]:
+    stripped = raw_text.strip()
+    if not stripped:
+        raise ValueError("mutation output was empty")
+
+    candidates = [stripped]
+    unfenced = strip_outer_code_fence(stripped)
+    if unfenced != stripped:
+        candidates.append(unfenced)
+
+    for candidate in candidates:
+        try:
+            return parse_json_object(candidate), "json"
+        except Exception:
+            continue
+
+    for candidate in candidates:
+        parsed = parse_frontmatter_document(candidate)
+        if parsed is None:
+            continue
+        metadata, revised_skill_md = parsed
+        payload = {
+            "hypothesis": str(metadata.get("hypothesis", "")).strip(),
+            "failure_family": normalize_choice(str(metadata.get("failure_family", "")), CHECKPOINT_FAILURE_FAMILIES),
+            "change_tactic": normalize_choice(str(metadata.get("change_tactic", "")), CHECKPOINT_CHANGE_TACTICS),
+            "checkpoint_guard_explanation": str(
+                metadata.get(
+                    "checkpoint_guard_explanation",
+                    "Recovered from frontmatter markdown output without a JSON wrapper.",
+                )
+            ).strip(),
+            "changed_sections": infer_changed_sections(current_skill_text, revised_skill_md),
+            "expected_case_ids": parse_json_list(str(metadata.get("expected_case_ids", ""))),
+            "revised_skill_md": revised_skill_md,
+        }
+        return payload, "frontmatter"
+
+    prefixed = parse_prefixed_metadata_document(stripped)
+    if prefixed is not None:
+        metadata, revised_skill_md = prefixed
+        if revised_skill_md.startswith("---") or revised_skill_md.startswith("#"):
+            payload = {
+                "hypothesis": str(metadata.get("hypothesis", "")).strip(),
+                "failure_family": normalize_choice(str(metadata.get("failure_family", "")), CHECKPOINT_FAILURE_FAMILIES),
+                "change_tactic": normalize_choice(str(metadata.get("change_tactic", "")), CHECKPOINT_CHANGE_TACTICS),
+                "checkpoint_guard_explanation": str(
+                    metadata.get(
+                        "checkpoint_guard_explanation",
+                        "Recovered from prefixed metadata output without a JSON wrapper.",
+                    )
+                ).strip(),
+                "changed_sections": infer_changed_sections(current_skill_text, revised_skill_md),
+                "expected_case_ids": parse_json_list(str(metadata.get("expected_case_ids", ""))),
+                "revised_skill_md": revised_skill_md,
+            }
+            return payload, "prefixed-metadata"
+
+    raise ValueError("mutation output was not recoverable as JSON, frontmatter markdown, or prefixed metadata")
 
 
 def load_mutation_parsed_output(iteration_dir: Path) -> dict[str, Any]:
@@ -656,6 +909,17 @@ def build_mutation_prompt(
     latest_keep = mutation_context.get("latest_keep")
     recent_attempts = mutation_context.get("recent_attempts", [])
     failed_attempts_since_keep = mutation_context.get("failed_attempts_since_keep", [])
+    latest_keep_view = compact_prompt_attempt_view(latest_keep) if isinstance(latest_keep, dict) else None
+    recent_attempts_view = [
+        compact_prompt_attempt_view(item)
+        for item in recent_attempts[-PROMPT_RECENT_ATTEMPT_LIMIT:]
+        if isinstance(item, dict)
+    ]
+    blocked_attempts_view = [
+        compact_prompt_attempt_view(item)
+        for item in failed_attempts_since_keep[-PROMPT_BLOCKED_ATTEMPT_LIMIT:]
+        if isinstance(item, dict)
+    ]
     return (
         f"Rewrite only {TARGET_REL.as_posix()}.\n\n"
         "Goal: improve the fixed Project Hail Mary gold-reference evaluator without changing the harness.\n"
@@ -682,11 +946,11 @@ def build_mutation_prompt(
         "- checkpoint_guard_explanation must state why this direction is not the same as the blocked directions in the current checkpoint.\n\n"
         f"Iteration id: {iteration_id}\n"
         "Latest accepted keep:\n"
-        f"{json.dumps(latest_keep, ensure_ascii=False, indent=2)}\n\n"
+        f"{json.dumps(latest_keep_view, ensure_ascii=False, indent=2)}\n\n"
         "Recent mutation attempts:\n"
-        f"{json.dumps(recent_attempts, ensure_ascii=False, indent=2)}\n\n"
+        f"{json.dumps(recent_attempts_view, ensure_ascii=False, indent=2)}\n\n"
         "Blocked discarded directions since latest keep:\n"
-        f"{json.dumps(failed_attempts_since_keep, ensure_ascii=False, indent=2)}\n\n"
+        f"{json.dumps(blocked_attempts_view, ensure_ascii=False, indent=2)}\n\n"
         "Current accepted quick-gate failures:\n"
         f"{json.dumps(quick_failures, ensure_ascii=False, indent=2)}\n\n"
         "Current accepted full-suite failures:\n"
@@ -744,67 +1008,97 @@ def run_mutation(
         "additionalProperties": False,
     }
     write_json(schema_path, schema)
-    collision_feedback: list[str] = []
+    retry_feedback: list[str] = []
     attempts: list[dict[str, Any]] = []
     accepted_structured: dict[str, Any] | None = None
     accepted_result: subprocess.CompletedProcess[str] | None = None
     accepted_raw_output_path: Path | None = None
     accepted_direction: dict[str, Any] | None = None
-    for attempt_index in range(1, 4):
+    accepted_parse_mode = ""
+    for attempt_index in range(1, MUTATION_MAX_ATTEMPTS + 1):
         attempt_prompt = prompt
-        if collision_feedback:
+        if retry_feedback:
             attempt_prompt += (
-                "\n\nCheckpoint collision feedback:\n"
-                + "\n".join(f"- {item}" for item in collision_feedback)
-                + "\nGenerate a materially different candidate."
+                "\n\nRetry feedback:\n"
+                + "\n".join(f"- {item}" for item in retry_feedback)
+                + "\nReturn only one valid JSON object. Do not wrap it in markdown fences. "
+                "Do not put the fields into frontmatter or key=value lines. "
+                "Put the full revised skill file only inside revised_skill_md."
             )
         attempt_raw_output_path = output_path.with_name(f"mutation-last-message.attempt-{attempt_index:02d}.json")
-        result = run_command(
-            [
-                "codex",
-                "exec",
-                "-m",
-                MUTATOR_MODEL,
-                "-c",
-                f'model_reasoning_effort="{MUTATOR_REASONING_EFFORT}"',
-                "-s",
-                "read-only",
-                "--skip-git-repo-check",
-                "--output-schema",
-                str(schema_path),
-                "-o",
-                str(attempt_raw_output_path),
-                attempt_prompt,
-            ],
-            cwd=repo,
-            check=False,
-            timeout_sec=420,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Mutation run failed.\n"
-                f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        result: subprocess.CompletedProcess[str] | None = None
+        attempt_error = ""
+        parse_mode = ""
+        try:
+            result = run_command(
+                [
+                    "codex",
+                    "exec",
+                    "-m",
+                    MUTATOR_MODEL,
+                    "-c",
+                    f'model_reasoning_effort="{MUTATOR_REASONING_EFFORT}"',
+                    "-s",
+                    "read-only",
+                    "--skip-git-repo-check",
+                    "--output-schema",
+                    str(schema_path),
+                    "-o",
+                    str(attempt_raw_output_path),
+                    attempt_prompt,
+                ],
+                cwd=repo,
+                check=False,
+                timeout_sec=MUTATION_TIMEOUT_SEC,
             )
-        if not attempt_raw_output_path.exists():
-            raise RuntimeError("Mutation run completed without writing output schema result")
-        structured = json.loads(attempt_raw_output_path.read_text(encoding="utf-8"))
-        if not isinstance(structured, dict):
-            raise RuntimeError(f"Mutation output is not a JSON object: {structured}")
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "Mutation run failed.\n"
+                    f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+                )
+            if not attempt_raw_output_path.exists():
+                raise RuntimeError("Mutation run completed without writing output schema result")
+            raw_text = attempt_raw_output_path.read_text(encoding="utf-8")
+            structured, parse_mode = extract_structured_payload(
+                raw_text,
+                current_skill_text=current_skill_text,
+            )
+        except Exception as exc:
+            attempt_error = str(exc)
+            attempts.append(
+                {
+                    "attempt_index": attempt_index,
+                    "error": attempt_error,
+                    "raw_output_path": str(attempt_raw_output_path),
+                    "stdout": result.stdout if result is not None else "",
+                    "stderr": result.stderr if result is not None else "",
+                }
+            )
+            if "timed out after" in attempt_error.lower():
+                retry_feedback.append("Previous attempt timed out. Keep the candidate smaller and answer with the minimal valid JSON object.")
+            elif "not recoverable as json" in attempt_error.lower() or "expecting value" in attempt_error.lower():
+                retry_feedback.append("Previous attempt returned non-JSON output. Return only a single JSON object that matches the schema.")
+            else:
+                retry_feedback.append(shorten_text(attempt_error, limit=220))
+            if attempt_index == MUTATION_MAX_ATTEMPTS:
+                raise RuntimeError(attempt_error)
+            continue
         direction = build_direction_summary(structured)
         blocked_match = find_blocked_direction_match(direction, blocked_directions)
         attempts.append(
             {
                 "attempt_index": attempt_index,
                 "parsed_output": structured,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
+                "parse_mode": parse_mode,
+                "stdout": result.stdout if result is not None else "",
+                "stderr": result.stderr if result is not None else "",
                 "raw_output_path": str(attempt_raw_output_path),
                 "direction": direction,
             }
         )
         if blocked_match:
             blocked = blocked_match["blocked"]
-            collision_feedback.append(
+            retry_feedback.append(
                 "candidate collided with blocked discard "
                 + json.dumps(
                     {
@@ -823,11 +1117,12 @@ def run_mutation(
         accepted_result = result
         accepted_raw_output_path = attempt_raw_output_path
         accepted_direction = direction
+        accepted_parse_mode = parse_mode
         break
     if accepted_structured is None or accepted_result is None or accepted_raw_output_path is None or accepted_direction is None:
         raise RuntimeError(
-            "Mutation candidate repeatedly collided with blocked checkpoint directions.\n"
-            + "\n".join(collision_feedback)
+            "Mutation candidate never produced a usable accepted payload.\n"
+            + "\n".join(retry_feedback)
         )
     shutil.copyfile(accepted_raw_output_path, final_raw_output_path)
     revised_skill_md = str(accepted_structured.get("revised_skill_md", ""))
@@ -841,13 +1136,14 @@ def run_mutation(
         "reasoning_effort": MUTATOR_REASONING_EFFORT,
         "prompt": prompt,
         "parsed_output": accepted_structured,
+        "parse_mode": accepted_parse_mode,
         "direction": accepted_direction,
         "stdout": accepted_result.stdout,
         "stderr": accepted_result.stderr,
         "raw_output_path": str(final_raw_output_path),
         "schema_path": str(schema_path),
         "blocked_directions": blocked_directions,
-        "collision_feedback": collision_feedback,
+        "retry_feedback": retry_feedback,
         "attempts": attempts,
     }
     write_json(output_path, payload)
