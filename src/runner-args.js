@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { createClaudeProviderAdapter } from './providers/claude.js';
 import { createCodexProviderAdapter } from './providers/codex.js';
 import { createGeminiProviderAdapter } from './providers/gemini.js';
+import { createKiroProviderAdapter } from './providers/kiro.js';
+import { createKimiProviderAdapter } from './providers/kimi.js';
 import { createProviderAdapterRegistry } from './providers/index.js';
 
 export function uniqueDirs(dirs = []) {
@@ -41,6 +43,12 @@ export function createRunnerArgsBuilder({
     }),
     createGeminiProviderAdapter({
       buildArgs: ({ session, prompt }) => buildGeminiArgs({ session, prompt }),
+    }),
+    createKiroProviderAdapter({
+      buildArgs: ({ session, workspaceDir, prompt }) => buildKiroArgs({ session, workspaceDir, prompt }),
+    }),
+    createKimiProviderAdapter({
+      buildArgs: ({ session, workspaceDir, prompt }) => buildKimiArgs({ session, workspaceDir, prompt }),
     }),
   ]);
 
@@ -131,10 +139,42 @@ export function createRunnerArgsBuilder({
     return args;
   }
 
+  function buildKiroArgs({ session, workspaceDir, prompt }) {
+    const args = ['chat', '--no-interactive'];
+    const model = resolveModelSetting(session).value || defaultModel;
+    const sessionId = getSessionId(session);
+
+    if (session.mode === 'dangerous') {
+      args.push('--trust-all-tools');
+    }
+
+    if (model) args.push('--model', model);
+    if (sessionId) args.push('--resume-id', sessionId);
+    args.push(prompt);
+    return args;
+  }
+
+  function buildKimiArgs({ session, workspaceDir, prompt }) {
+    const args = ['--non-interactive', '--output-format', 'stream-json'];
+    const model = resolveModelSetting(session).value || defaultModel;
+    const sessionId = getSessionId(session);
+
+    if (session.mode === 'dangerous') {
+      args.push('--yolo');
+    }
+
+    if (model) args.push('--model', model);
+    if (sessionId) args.push('--resume', sessionId);
+    args.push(prompt);
+    return args;
+  }
+
   return {
     buildSessionRunnerArgs,
     buildCodexArgs,
     buildClaudeArgs,
     buildGeminiArgs,
+    buildKiroArgs,
+    buildKimiArgs,
   };
 }
