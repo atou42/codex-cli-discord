@@ -314,7 +314,7 @@ const MODEL_AUTO_COMPACT_TOKEN_LIMIT = toInt(
   MAX_INPUT_TOKENS_BEFORE_COMPACT,
 );
 const CLAUDE_RUNTIME_MODE = normalizeSessionRuntimeMode(
-  process.env.CLAUDE__RUNTIME_MODE || process.env.CLAUDE_RUNTIME_MODE || 'normal',
+  process.env.CLAUDE__RUNTIME_MODE || process.env.CLAUDE_RUNTIME_MODE || 'long',
 ) || 'normal';
 const CLAUDE_LONG_IDLE_MS = normalizeIntervalMs(
   process.env.CLAUDE__LONG_IDLE_MS || process.env.CLAUDE_LONG_IDLE_MS,

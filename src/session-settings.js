@@ -243,7 +243,7 @@ export function createSessionSettings({
   taskRetryBaseDelayMs = 1000,
   taskRetryMaxDelayMs = 8000,
   compactStrategy = 'native',
-  claudeRuntimeMode = 'normal',
+  claudeRuntimeMode = 'long',
   compactOnThreshold = true,
   maxInputTokensBeforeCompact = 250000,
   modelAutoCompactTokenLimit = maxInputTokensBeforeCompact,
