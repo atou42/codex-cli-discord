@@ -383,6 +383,7 @@ const appContext = createAppContext({
     compactOnThreshold: COMPACT_ON_THRESHOLD,
     maxInputTokensBeforeCompact: MAX_INPUT_TOKENS_BEFORE_COMPACT,
     modelAutoCompactTokenLimit: MODEL_AUTO_COMPACT_TOKEN_LIMIT,
+    defaultModel: DEFAULT_MODEL,
     readCodexDefaults,
     normalizeProvider,
     getSupportedCompactStrategies,

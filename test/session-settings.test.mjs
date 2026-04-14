@@ -291,3 +291,32 @@ test('session-settings provides compact descriptions and provider defaults', () 
     source: 'provider',
   });
 });
+
+test('session-settings uses DEFAULT_MODEL as the resolved provider model fallback', () => {
+  const settings = createSessionSettings({
+    defaultModel: 'gpt-5.4',
+    readCodexDefaults: () => ({
+      model: null,
+      modelConfigured: false,
+      effort: null,
+      effortConfigured: false,
+      fastMode: true,
+    }),
+    normalizeProvider: (provider) => String(provider || '').trim().toLowerCase() || 'codex',
+  });
+
+  assert.deepEqual(settings.resolveModelSetting({ provider: 'codex', model: null }), {
+    value: 'gpt-5.4',
+    source: 'env default',
+  });
+  assert.deepEqual(settings.resolveModelSetting({ provider: 'gemini', model: null }), {
+    value: 'gpt-5.4',
+    source: 'env default',
+  });
+  assert.deepEqual(settings.getProviderDefaults('gemini'), {
+    model: 'gpt-5.4',
+    effort: null,
+    fastMode: false,
+    source: 'env default',
+  });
+});

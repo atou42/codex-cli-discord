@@ -134,6 +134,7 @@ export function createAppContext({
       setSessionId: identity.setSessionId,
       getSessionProvider: identity.getSessionProvider,
       getSessionLanguage: sessionSettings.getSessionLanguage,
+      resolveModelSetting: sessionSettings.resolveModelSetting,
       resolveReasoningEffortSetting: sessionSettings.resolveReasoningEffortSetting,
       resolveFastModeSetting: sessionSettings.resolveFastModeSetting,
       resolveRuntimeModeSetting: sessionSettings.resolveRuntimeModeSetting,

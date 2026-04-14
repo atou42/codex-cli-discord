@@ -16,6 +16,7 @@ test('createAppContext wires factories and cross-links composition dependencies'
     getSessionLanguage: () => 'zh',
     getEffectiveSecurityProfile: () => 'team',
     getProviderDefaults: () => ({ model: 'gpt-5.4', effort: 'high', source: 'config.toml' }),
+    resolveModelSetting: () => ({ value: 'gpt-5.4', source: 'config.toml' }),
     resolveReasoningEffortSetting: () => ({ value: 'high', source: 'config.toml' }),
     resolveFastModeSetting: () => ({ enabled: false, supported: true, source: 'config.toml' }),
     resolveTimeoutSetting: () => ({ timeoutMs: 60000 }),
@@ -234,6 +235,7 @@ test('createAppContext wires factories and cross-links composition dependencies'
   assert.equal(calls.promptRuntime.promptOrchestratorOptions.getSession, sessionStore.getSession);
   assert.equal(calls.promptRuntime.promptOrchestratorOptions.resolveTimeoutSetting, sessionSettings.resolveTimeoutSetting);
   assert.equal(calls.promptRuntime.promptOrchestratorOptions.resolveTaskRetrySetting, sessionSettings.resolveTaskRetrySetting);
+  assert.equal(calls.promptRuntime.promptOrchestratorOptions.resolveModelSetting, sessionSettings.resolveModelSetting);
   assert.equal(calls.promptRuntime.promptOrchestratorOptions.resolveReasoningEffortSetting, sessionSettings.resolveReasoningEffortSetting);
   assert.equal(calls.promptRuntime.channelQueueOptions.resolveSecurityContext, securityPolicy.resolveSecurityContext);
   assert.equal(calls.promptRuntime.channelQueueOptions.getCurrentUserId, undefined);

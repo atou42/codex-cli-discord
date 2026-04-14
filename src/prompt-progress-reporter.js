@@ -466,6 +466,37 @@ function formatEffortValue(setting, provider, language = 'en') {
   return value;
 }
 
+function formatSettingSourceLabel(source, language = 'en') {
+  if (source === 'session override') {
+    return language === 'en' ? 'session override' : '频道覆盖';
+  }
+  if (source === 'parent channel') {
+    return language === 'en' ? 'parent channel' : '父频道默认';
+  }
+  if (source === 'config.toml') {
+    return 'config.toml';
+  }
+  if (source === 'env default') {
+    return language === 'en' ? 'env default' : '环境默认';
+  }
+  return language === 'en' ? 'provider default' : 'provider 默认';
+}
+
+function formatModelValue(modelSetting, language = 'en') {
+  const value = String(modelSetting?.value || '').trim();
+  const source = String(modelSetting?.source || 'provider').trim();
+  if (!value) {
+    return language === 'en' ? 'unknown model' : '未知 model';
+  }
+  if (source === 'config.toml') {
+    return `\`${value}\` (config.toml)`;
+  }
+  if (source === 'provider') {
+    return `\`${value}\``;
+  }
+  return `\`${value}\` (${formatSettingSourceLabel(source, language)})`;
+}
+
 export function createPromptProgressReporterFactory({
   defaultUiLanguage = 'zh',
   progressUpdatesEnabled = true,
@@ -483,6 +514,7 @@ export function createPromptProgressReporterFactory({
   safeReply = async () => null,
   normalizeUiLanguage = defaultNormalizeUiLanguage,
   slashRef = (name) => `/${name}`,
+  resolveModelSetting = () => ({ value: null, source: 'provider' }),
   resolveReasoningEffortSetting = () => ({ value: '', source: 'provider' }),
   resolveFastModeSetting = () => ({ enabled: false, supported: false, source: 'provider unsupported' }),
   truncate = defaultTruncate,
@@ -580,6 +612,7 @@ export function createPromptProgressReporterFactory({
       const phase = formatRuntimePhaseLabel(channelState?.activeRun?.phase || 'starting', lang);
       const effort = formatEffortValue(resolveReasoningEffortSetting(session), session?.provider, lang);
       const fastMode = formatFastModeValue(resolveFastModeSetting(session), lang);
+      const model = formatModelValue(resolveModelSetting(session), lang);
       const hint = status === 'running'
         ? (lang === 'en'
           ? 'Use `!c` to interrupt.'
@@ -594,6 +627,7 @@ export function createPromptProgressReporterFactory({
         statusLine,
         `${lang === 'en' ? '• elapsed' : '• 耗时'}: ${elapsed}`,
         `${lang === 'en' ? '• phase' : '• 阶段'}: ${phase}`,
+        `${lang === 'en' ? '• model' : '• model'}: ${model}`,
         effort ? `${lang === 'en' ? '• effort' : '• effort'}: ${effort}` : null,
         fastMode ? `${lang === 'en' ? '• fast mode' : '• fast mode'}: ${fastMode}` : null,
         `${lang === 'en' ? '• event count' : '• 事件数'}: ${events}`,
@@ -830,6 +864,7 @@ export function createPromptProgressReporterFactory({
         status,
         `${lang === 'en' ? '• elapsed' : '• 耗时'}: ${elapsed}`,
         `${lang === 'en' ? '• phase' : '• 阶段'}: ${formatRuntimePhaseLabel(channelState?.activeRun?.phase || 'done', lang)}`,
+        `${lang === 'en' ? '• model' : '• model'}: ${formatModelValue(resolveModelSetting(session), lang)}`,
         `${lang === 'en' ? '• event count' : '• 事件数'}: ${events}`,
         `${lang === 'en' ? '• latest activity' : '• 最新活动'}: ${latestStep}`,
         ...renderProcessContentLines(recentActivities, lang, processLineLimit),

@@ -247,6 +247,7 @@ export function createSessionSettings({
   compactOnThreshold = true,
   maxInputTokensBeforeCompact = 250000,
   modelAutoCompactTokenLimit = maxInputTokensBeforeCompact,
+  defaultModel = null,
   readCodexDefaults = () => ({
     model: null,
     modelConfigured: false,
@@ -260,6 +261,10 @@ export function createSessionSettings({
   getParentSession = () => null,
 } = {}) {
   let resolveParentSessionFn = getParentSession;
+
+  function getDefaultModelValue() {
+    return String(defaultModel || '').trim();
+  }
 
   function readProviderScopedValue(session, provider, field) {
     if (!session || typeof session !== 'object') return null;
@@ -403,6 +408,7 @@ export function createSessionSettings({
       return { value: parentValue, source: 'parent channel' };
     }
 
+    const defaultModelValue = getDefaultModelValue();
     if (provider === 'codex') {
       const codexDefaults = readCodexDefaults() || {};
       const value = String(codexDefaults.model ?? '').trim();
@@ -410,7 +416,14 @@ export function createSessionSettings({
       if (configured && value) {
         return { value, source: 'config.toml' };
       }
+      if (defaultModelValue) {
+        return { value: defaultModelValue, source: 'env default' };
+      }
       return { value: null, source: 'provider' };
+    }
+
+    if (defaultModelValue) {
+      return { value: defaultModelValue, source: 'env default' };
     }
 
     return {
@@ -534,16 +547,29 @@ export function createSessionSettings({
 
   function getProviderDefaults(provider) {
     if (normalizeProvider(provider) !== 'codex') {
+      const defaultModelValue = getDefaultModelValue();
       return {
-        model: null,
+        model: defaultModelValue || null,
         effort: null,
         fastMode: false,
-        source: 'provider',
+        source: defaultModelValue ? 'env default' : 'provider',
       };
     }
+    const codexDefaults = readCodexDefaults();
+    const value = String(codexDefaults?.model ?? '').trim();
+    const configured = codexDefaults?.modelConfigured ?? Boolean(value);
+    if (configured && value) {
+      return {
+        ...codexDefaults,
+        source: 'config.toml',
+      };
+    }
+    const defaultModelValue = getDefaultModelValue();
     return {
-      ...readCodexDefaults(),
-      source: 'config.toml',
+      ...codexDefaults,
+      model: defaultModelValue || codexDefaults?.model || null,
+      modelConfigured: defaultModelValue ? true : codexDefaults?.modelConfigured,
+      source: defaultModelValue ? 'env default' : 'config.toml',
     };
   }
 

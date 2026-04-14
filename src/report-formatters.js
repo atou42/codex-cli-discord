@@ -106,6 +106,30 @@ export function createReportFormatters({
     return `\`${value}\`（${formatSettingSourceLabel(source, language)}）`;
   }
 
+  function formatResolvedModelLabel(setting, fallback, language = 'en') {
+    const fallbackText = String(fallback ?? '').trim();
+    const value = String(setting?.value || '').trim() || fallbackText;
+    const source = setting?.source || 'unknown';
+    if (!value) {
+      return language === 'en' ? 'unknown model' : '未知 model';
+    }
+    if (source === 'config.toml') {
+      return `${value} _(config.toml)_`;
+    }
+    if (source === 'provider') {
+      return value;
+    }
+    if (source === 'env default') {
+      return language === 'en'
+        ? `${value} _(env default)_`
+        : `${value} _(环境默认)_`;
+    }
+    if (language === 'en') {
+      return `\`${value}\` (${formatSettingSourceLabel(source, language)})`;
+    }
+    return `\`${value}\`（${formatSettingSourceLabel(source, language)}）`;
+  }
+
   function formatProgressSettingValue(setting, fallback, language = 'en') {
     const value = String(setting?.value || '').trim() || fallback;
     const source = String(setting?.source || 'unknown').trim().toLowerCase();
@@ -361,7 +385,7 @@ export function createReportFormatters({
       ? (lang === 'en' ? 'dangerous (no sandbox, full access)' : 'dangerous（无沙盒，全权限）')
       : (lang === 'en' ? 'safe (sandboxed, no network)' : 'safe（沙盒隔离，无网络）');
     const workspaceLines = getWorkspaceStatusLines(key, session, lang);
-    const defaultModel = formatResolvedSettingLabel(modelSetting, defaults.model, lang);
+    const defaultModel = formatResolvedModelLabel(modelSetting, defaults.model, lang);
     const defaultEffort = formatResolvedSettingLabel(effortSetting, defaults.effort, lang);
     const runtimeSummary = formatProviderRuntimeSummary(provider, lang);
     const sessionFieldLabel = formatProviderSessionTerm(provider, lang);
@@ -465,10 +489,12 @@ export function createReportFormatters({
     const lang = normalizeUiLanguage(language);
     const provider = getSessionProvider(session);
     const defaults = getProviderDefaults(provider);
+    const modelSetting = resolveModelSetting(session);
     const effortSetting = resolveReasoningEffortSetting(session);
     const effortValue = getReasoningEffortLevels(provider).length
       ? formatProgressSettingValue(effortSetting, defaults.effort, lang)
       : null;
+    const defaultModel = formatResolvedModelLabel(modelSetting, defaults.model, lang);
     if (!runtime.running) {
       if (lang === 'en') {
         return [
@@ -496,6 +522,7 @@ export function createReportFormatters({
       return [
         '🧵 **Task Progress**',
         `• runtime: ${formatRuntimeLabel(runtime, lang)}`,
+        `• model: ${defaultModel}`,
         effortValue ? `• effort: ${effortValue}` : null,
         resolveFastModeSetting(session)?.supported
           ? `• fast mode: ${formatFastModeLabel(resolveFastModeSetting(session).enabled, lang)} (${formatSettingSourceLabel(resolveFastModeSetting(session).source, lang)})`
@@ -516,6 +543,7 @@ export function createReportFormatters({
     return [
       '🧵 **任务进度**',
       `• 运行状态: ${formatRuntimeLabel(runtime, lang)}`,
+      `• model: ${defaultModel}`,
       effortValue ? `• effort: ${effortValue}` : null,
       resolveFastModeSetting(session)?.supported
         ? `• fast mode: ${formatFastModeLabel(resolveFastModeSetting(session).enabled, lang)}（${formatSettingSourceLabel(resolveFastModeSetting(session).source, lang)}）`

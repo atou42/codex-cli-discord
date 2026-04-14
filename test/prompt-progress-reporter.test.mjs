@@ -74,6 +74,10 @@ function createHarness(overrides = {}) {
     },
     normalizeUiLanguage: (value) => (String(value || '').trim().toLowerCase() === 'en' ? 'en' : 'zh'),
     slashRef: (name) => `/bot-${name}`,
+    resolveModelSetting: (session) => ({
+      value: session?.model || 'gpt-5.4',
+      source: session?.model ? 'session override' : 'config.toml',
+    }),
     resolveReasoningEffortSetting: (session) => ({
       value: session?.effort || 'high',
       source: session?.effort ? 'session override' : 'config.toml',
@@ -232,7 +236,7 @@ test('createPromptProgressReporterFactory ignores stderr when disabled and keeps
 test('createPromptProgressReporterFactory truncates overflowing cards on line boundaries', async () => {
   const harness = createHarness({
     factoryOptions: {
-      progressMessageMaxChars: 120,
+      progressMessageMaxChars: 70,
     },
   });
 
@@ -250,6 +254,40 @@ test('createPromptProgressReporterFactory truncates overflowing cards on line bo
   await harness.reporter.finish({ ok: true });
   const finalCard = harness.edits[harness.edits.length - 1].content;
   assert.match(finalCard, /\n\.\.\.$/);
+});
+
+test('createPromptProgressReporterFactory includes model line in running and final cards', async () => {
+  const harness = createHarness({
+    session: {
+      provider: 'codex',
+      model: 'gpt-5.3-codex',
+    },
+    factoryOptions: {
+      resolveModelSetting: (session) => ({
+        value: session?.model,
+        source: session?.model ? 'session override' : 'provider',
+      }),
+    },
+  });
+
+  await harness.reporter.start();
+  await harness.reporter.finish({ ok: true });
+
+  assert.match(harness.sent[0].content, /• model: `gpt-5\.3-codex` \(session override\)/);
+  assert.match(harness.edits[harness.edits.length - 1].content, /• model: `gpt-5\.3-codex` \(session override\)/);
+});
+
+test('createPromptProgressReporterFactory shows resolved default model instead of provider default text', async () => {
+  const harness = createHarness({
+    session: {
+      provider: 'codex',
+    },
+  });
+
+  await harness.reporter.start();
+
+  assert.match(harness.sent[0].content, /• model: `gpt-5\.4` \(config\.toml\)/);
+  assert.doesNotMatch(harness.sent[0].content, /provider default|provider 默认/);
 });
 
 test('createPromptProgressReporterFactory derives Claude commentary and tool progress from stream events', async () => {

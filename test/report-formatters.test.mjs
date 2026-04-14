@@ -280,6 +280,33 @@ test('createReportFormatters.formatProgressReport keeps running hints minimal', 
   assert.doesNotMatch(report, /\/bot-cancel/);
 });
 
+test('createReportFormatters shows concrete provider model values without provider default wording', () => {
+  const formatters = createFormatters({
+    getProviderDefaults: () => ({ model: 'gpt-5.4', effort: null, source: 'provider' }),
+    resolveModelSetting: () => ({ value: 'gpt-5.4', source: 'provider' }),
+    getSupportedReasoningEffortLevels: () => [],
+    getRuntimeSnapshot: () => ({
+      running: true,
+      queued: 0,
+      progressPlan: null,
+      completedSteps: [],
+      recentActivities: [],
+      progressText: 'building',
+      progressAgoMs: 1_234,
+      messageId: 'msg-1',
+      progressMessageId: 'progress-1',
+      progressEvents: 1,
+      activeSinceMs: 3_000,
+      pid: 1234,
+      phase: 'exec',
+    }),
+  });
+
+  const report = formatters.formatProgressReport('thread-1', { provider: 'codex', language: 'en' }, { id: 'channel-1' });
+
+  assert.match(report, /^• model: gpt-5\.4$/m);
+});
+
 test('createReportFormatters.formatDoctorReport includes allowlist and workspace lock diagnostics', () => {
   const formatters = createFormatters({ botProvider: 'gemini' });
   const session = { provider: 'gemini', language: 'en', workspaceDir: '/repo/live' };
