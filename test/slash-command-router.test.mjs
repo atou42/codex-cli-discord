@@ -189,6 +189,26 @@ test('createSlashCommandRouter routes abort alias to cancel handler', async () =
   }]);
 });
 
+test('createSlashCommandRouter awaits async status reports', async () => {
+  const state = createRouterState({
+    formatStatusReport: async () => 'status-with-live-quota',
+  });
+
+  const handled = await state.router({
+    interaction: createInteraction('cx_status'),
+    commandName: 'status',
+    respond: async (payload) => {
+      state.replies.push(payload);
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(state.replies, [{
+    content: 'status-with-live-quota',
+    flags: 64,
+  }]);
+});
+
 test('createSlashCommandRouter opens workspace browser for setdir browse', async () => {
   const state = createRouterState();
   const interaction = createInteraction('cx_setdir');

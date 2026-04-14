@@ -106,7 +106,7 @@ export function createSlashCommandRouter({
 
   registerSlashHandlers(handlers, ['status'], async ({ interaction, key, session, respond }) => {
     await respond({
-      content: formatStatusReport(key, session, interaction.channel),
+      content: await formatStatusReport(key, session, interaction.channel),
       flags: 64,
     });
   });

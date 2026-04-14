@@ -44,6 +44,7 @@ import {
 import {
   buildSpawnEnv,
   formatCliHealth,
+  getCodexAccountRateLimits,
   getCliHealth as getCliHealthBase,
   getProviderBin as getProviderBinBase,
   isCliNotFound,
@@ -324,6 +325,11 @@ const getCliHealth = (provider = DEFAULT_PROVIDER) => getCliHealthBase(provider,
   spawnEnv: SPAWN_ENV,
   safeError,
 });
+const getProviderRateLimits = (provider = DEFAULT_PROVIDER) => getCodexAccountRateLimits(provider, {
+  codexBin: CODEX_BIN,
+  spawnEnv: SPAWN_ENV,
+  safeError,
+});
 
 ensureDir(DATA_DIR);
 ensureDir(WORKSPACE_ROOT);
@@ -561,6 +567,7 @@ const appContext = createAppContext({
       formatProviderReasoningSurface,
       getSupportedReasoningEffortLevels,
       getCliHealth,
+      getProviderRateLimits,
       formatCliHealth,
       formatLanguageLabel,
       formatSecurityProfileLabel,

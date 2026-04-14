@@ -43,6 +43,7 @@ export function createReportFormatters({
   resolveCompactEnabledSetting = () => ({ enabled: true, source: 'env default' }),
   resolveCompactThresholdSetting = () => ({ tokens: 0, source: 'env default' }),
   resolveNativeCompactTokenLimitSetting = () => ({ tokens: 0, source: 'env default' }),
+  getProviderRateLimits = async () => null,
   getWorkspaceBinding = () => ({
     workspaceDir: null,
     source: 'unset',
@@ -140,6 +141,73 @@ export function createReportFormatters({
     return enabled
       ? (language === 'en' ? 'on' : '开启')
       : (language === 'en' ? 'off' : '关闭');
+  }
+
+  function formatPercent(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '-';
+    if (Number.isInteger(number)) return String(number);
+    return String(Math.round(number * 10) / 10);
+  }
+
+  function formatResetAt(epochSeconds, language = 'en') {
+    const seconds = Number(epochSeconds);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return language === 'en' ? 'unknown' : '未知';
+    }
+    const date = new Date(seconds * 1000);
+    const pad = (value) => String(value).padStart(2, '0');
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate()),
+    ].join('-') + ` ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function selectCodexRateLimitSnapshot(rateLimitReport) {
+    if (!rateLimitReport || rateLimitReport.ok === false) return null;
+    return rateLimitReport.rateLimitsByLimitId?.codex
+      || rateLimitReport.rateLimits
+      || null;
+  }
+
+  function formatRateLimitWindowLine(label, window, language = 'en') {
+    if (!window) return null;
+    const used = Number(window.usedPercent);
+    const safeUsed = Number.isFinite(used) ? Math.max(0, Math.min(100, used)) : null;
+    const remaining = safeUsed === null ? '-' : formatPercent(Math.max(0, 100 - safeUsed));
+    const usedText = safeUsed === null ? '-' : formatPercent(safeUsed);
+    const resetAt = formatResetAt(window.resetsAt, language);
+    if (language === 'en') {
+      return `• Codex ${label} quota: ${remaining}% remaining (used ${usedText}%, resets ${resetAt})`;
+    }
+    return `• Codex ${label} 余量: ${remaining}%（已用 ${usedText}%，重置 ${resetAt}）`;
+  }
+
+  function formatCodexRateLimitLines(provider, rateLimitReport, language = 'en') {
+    if (provider !== 'codex' || !rateLimitReport) return [];
+    if (rateLimitReport.ok === false) {
+      const error = String(rateLimitReport.error || 'unknown error').replace(/\s+/g, ' ').trim();
+      return [
+        language === 'en'
+          ? `• Codex quota: unavailable (${error || 'unknown error'})`
+          : `• Codex 额度: 暂不可用（${error || '未知错误'}）`,
+      ];
+    }
+
+    const snapshot = selectCodexRateLimitSnapshot(rateLimitReport);
+    if (!snapshot) {
+      return [
+        language === 'en'
+          ? '• Codex quota: unavailable (empty rate limit response)'
+          : '• Codex 额度: 暂不可用（返回为空）',
+      ];
+    }
+
+    return [
+      formatRateLimitWindowLine('5h', snapshot.primary, language),
+      formatRateLimitWindowLine('weekly', snapshot.secondary, language),
+    ].filter(Boolean);
   }
 
   function formatWorkspaceSourceLabel(source, language = 'zh') {
@@ -267,7 +335,7 @@ export function createReportFormatters({
     return `locked to \`${botProvider}\` (${getProviderDisplayName(botProvider)})`;
   }
 
-  function formatStatusReport(key, session, channel = null) {
+  function formatStatusReport(key, session, channel = null, { rateLimitReport = null } = {}) {
     const language = getSessionLanguage(session);
     const lang = normalizeUiLanguage(language);
     const provider = getSessionProvider(session);
@@ -290,6 +358,7 @@ export function createReportFormatters({
     const runtimeSummary = formatProviderRuntimeSummary(provider, lang);
     const sessionFieldLabel = formatProviderSessionTerm(provider, lang);
     const nativeCompact = formatNativeCompactSetting(provider, nativeLimit, lang);
+    const rateLimitLines = formatCodexRateLimitLines(provider, rateLimitReport, lang);
 
     if (lang === 'en') {
       return [
@@ -308,6 +377,7 @@ export function createReportFormatters({
         `• ui language: ${formatLanguageLabel(language)}`,
         `• permissions: ${formatPermissionsLabel(session, lang)}`,
         `• cli: ${formatCliHealth(cliHealth, lang)}`,
+        ...rateLimitLines,
         `• ${sessionFieldLabel}: ${formatSessionStatusLabel(session)}`,
         `• last run input tokens: ${formatTokenValue(session?.lastInputTokens)}`,
         `• security profile: ${formatSecurityProfileDisplay(security, lang)}`,
@@ -330,10 +400,27 @@ export function createReportFormatters({
       `• 界面语言: ${formatLanguageLabel(language)}`,
       `• 权限: ${formatPermissionsLabel(session, lang)}`,
       `• CLI: ${formatCliHealth(cliHealth, lang)}`,
+      ...rateLimitLines,
       `• ${sessionFieldLabel}: ${formatSessionStatusLabel(session)}`,
       `• 上一轮输入 tokens: ${formatTokenValue(session?.lastInputTokens)}`,
       `• security profile: ${formatSecurityProfileDisplay(security, lang)}`,
     ].filter(Boolean).join('\n');
+  }
+
+  async function formatStatusReportWithLiveData(key, session, channel = null) {
+    const provider = getSessionProvider(session);
+    let rateLimitReport = null;
+    if (provider === 'codex') {
+      try {
+        rateLimitReport = await getProviderRateLimits(provider);
+      } catch (err) {
+        rateLimitReport = {
+          ok: false,
+          error: String(err?.message || err || 'unknown error'),
+        };
+      }
+    }
+    return formatStatusReport(key, session, channel, { rateLimitReport });
   }
 
   function formatQueueReport(key, session = null, channel = null) {
@@ -923,6 +1010,7 @@ export function createReportFormatters({
 
   return {
     formatStatusReport,
+    formatStatusReportWithLiveData,
     formatQueueReport,
     formatProgressReport,
     formatCancelReport,

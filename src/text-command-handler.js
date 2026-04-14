@@ -89,7 +89,7 @@ export function createTextCommandHandler({
       }
 
       case 'status': {
-        await safeReply(message, formatStatusReport(key, session, message.channel));
+        await safeReply(message, await formatStatusReport(key, session, message.channel));
         break;
       }
 

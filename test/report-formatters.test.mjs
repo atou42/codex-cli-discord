@@ -199,6 +199,45 @@ test('createReportFormatters.formatStatusReport shows parent-channel inherited m
   assert.match(report, /workspace: `\/repo\/parent` \(parent channel\)/);
 });
 
+test('createReportFormatters.formatStatusReportWithLiveData shows Codex 5h and weekly quota', async () => {
+  const formatters = createFormatters({
+    getProviderRateLimits: async () => ({
+      ok: true,
+      rateLimits: {
+        limitId: 'codex',
+        primary: { usedPercent: 2, windowDurationMins: 300, resetsAt: 1776169989 },
+        secondary: { usedPercent: 12.5, windowDurationMins: 10080, resetsAt: 1776756789 },
+        credits: null,
+        planType: 'pro',
+      },
+      rateLimitsByLimitId: null,
+    }),
+  });
+
+  const report = await formatters.formatStatusReportWithLiveData('thread-1', {
+    provider: 'codex',
+    language: 'zh',
+    mode: 'safe',
+  }, { id: 'channel-1' });
+
+  assert.match(report, /Codex 5h 余量: 98%（已用 2%，重置 \d{4}-\d{2}-\d{2} \d{2}:\d{2}）/);
+  assert.match(report, /Codex weekly 余量: 87\.5%（已用 12\.5%，重置 \d{4}-\d{2}-\d{2} \d{2}:\d{2}）/);
+});
+
+test('createReportFormatters.formatStatusReportWithLiveData shows Codex quota query failures', async () => {
+  const formatters = createFormatters({
+    getProviderRateLimits: async () => ({ ok: false, error: 'login required' }),
+  });
+
+  const report = await formatters.formatStatusReportWithLiveData('thread-1', {
+    provider: 'codex',
+    language: 'en',
+    mode: 'safe',
+  }, { id: 'channel-1' });
+
+  assert.match(report, /Codex quota: unavailable \(login required\)/);
+});
+
 test('createReportFormatters.formatProgressReport returns localized idle hint', () => {
   const formatters = createFormatters({
     resolveSecurityContext: () => ({ mentionOnly: true, maxQueuePerChannel: 5, profile: 'public' }),

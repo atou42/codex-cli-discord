@@ -51,6 +51,23 @@ test('createTextCommandHandler updates mode through shared command actions', asy
   assert.deepEqual(replies, ['✅ mode = dangerous']);
 });
 
+test('createTextCommandHandler awaits async status reports', async () => {
+  const replies = [];
+  const session = { provider: 'codex' };
+
+  const handleCommand = createTextCommandHandler({
+    getSession: () => session,
+    formatStatusReport: async () => 'status-with-live-quota',
+    safeReply: async (_message, payload) => {
+      replies.push(payload);
+    },
+  });
+
+  await handleCommand(createMessage(), 'thread-1', '!status');
+
+  assert.deepEqual(replies, ['status-with-live-quota']);
+});
+
 test('createTextCommandHandler switches to a fresh session without retry hint', async () => {
   const replies = [];
   const session = { provider: 'codex', runnerSessionId: 'sess-1', codexThreadId: 'sess-1', lastInputTokens: 42 };

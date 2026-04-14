@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 import {
   getProviderBinEnvName,
@@ -13,6 +13,10 @@ function truncate(text, max) {
   const value = String(text || '');
   if (!value || value.length <= max) return value;
   return `${value.slice(0, max - 3)}...`;
+}
+
+function truncateError(text, max = 220) {
+  return truncate(String(text || '').replace(/\s+/g, ' ').trim(), max);
 }
 
 export function buildSpawnEnv(env) {
@@ -139,4 +143,138 @@ export function formatCliHealth(health, language = 'zh') {
       : `❌ 未找到 \`${health.bin}\`（可在 .env 设置 ${health.envKey || 'CLI_BIN'}=/绝对路径/${health.bin}）`;
   }
   return `❌ ${truncate(String(health.error || 'unknown error'), 220)}`;
+}
+
+export async function getCodexAccountRateLimits(provider = 'codex', {
+  codexBin = 'codex',
+  spawnEnv = process.env,
+  timeoutMs = 5000,
+  spawnImpl = spawn,
+  safeError = (err) => String(err?.message || err || 'unknown error'),
+} = {}) {
+  if (normalizeProvider(provider) !== 'codex') {
+    return {
+      ok: false,
+      unsupported: true,
+      error: 'rate limits are only exposed by Codex app-server',
+    };
+  }
+
+  return new Promise((resolve) => {
+    let child = null;
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+    let settled = false;
+    let accountRequestSent = false;
+
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (child && !child.killed) {
+        child.kill('SIGTERM');
+      }
+      resolve(payload);
+    };
+
+    const timer = setTimeout(() => {
+      finish({
+        ok: false,
+        error: `codex app-server rate limit query timed out after ${timeoutMs}ms`,
+      });
+    }, Math.max(1000, Number(timeoutMs || 5000)));
+
+    try {
+      child = spawnImpl(codexBin, ['app-server', '--listen', 'stdio://'], {
+        env: spawnEnv,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      finish({ ok: false, error: safeError(err) });
+      return;
+    }
+
+    const send = (message) => {
+      try {
+        child.stdin.write(`${JSON.stringify(message)}\n`);
+      } catch (err) {
+        finish({ ok: false, error: safeError(err) });
+      }
+    };
+
+    const handleLine = (line) => {
+      const trimmed = String(line || '').trim();
+      if (!trimmed) return;
+
+      let message;
+      try {
+        message = JSON.parse(trimmed);
+      } catch (err) {
+        finish({ ok: false, error: `invalid codex app-server response: ${safeError(err)}` });
+        return;
+      }
+
+      if (message.id === 1 && message.result && !accountRequestSent) {
+        accountRequestSent = true;
+        send({ id: 2, method: 'account/rateLimits/read' });
+        return;
+      }
+
+      if (message.id === 2) {
+        if (message.error) {
+          finish({
+            ok: false,
+            error: truncateError(message.error?.message || JSON.stringify(message.error)),
+          });
+          return;
+        }
+        finish({
+          ok: true,
+          ...message.result,
+        });
+      }
+    };
+
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdoutBuffer += chunk;
+      let nextNewline = stdoutBuffer.indexOf('\n');
+      while (nextNewline >= 0) {
+        const line = stdoutBuffer.slice(0, nextNewline);
+        stdoutBuffer = stdoutBuffer.slice(nextNewline + 1);
+        handleLine(line);
+        nextNewline = stdoutBuffer.indexOf('\n');
+      }
+    });
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderrBuffer = truncateError(`${stderrBuffer}${chunk}`, 1200);
+    });
+
+    child.on('error', (err) => {
+      finish({ ok: false, error: safeError(err) });
+    });
+
+    child.on('exit', (code, signal) => {
+      if (settled) return;
+      const reason = stderrBuffer || `codex app-server exited before rate limits response (code=${code}, signal=${signal || 'none'})`;
+      finish({ ok: false, error: truncateError(reason) });
+    });
+
+    send({
+      id: 1,
+      method: 'initialize',
+      params: {
+        clientInfo: {
+          name: 'agents-in-discord',
+          title: 'Agents in Discord',
+          version: '0.0.0',
+        },
+        capabilities: {
+          experimentalApi: true,
+        },
+      },
+    });
+  });
 }
