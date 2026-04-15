@@ -111,6 +111,23 @@ function formatError(err) {
   return String(err?.message || err || 'unknown error');
 }
 
+function formatLogValue(value) {
+  const text = String(value ?? '').trim();
+  return text || 'none';
+}
+
+function formatArgs(args) {
+  return JSON.stringify(args);
+}
+
+function logClaudeLongEvent(log, event, fields = {}) {
+  if (typeof log !== 'function') return;
+  const detail = Object.entries(fields)
+    .map(([key, value]) => `${key}=${formatLogValue(value)}`)
+    .join(' ');
+  log(`[claude-long] ${event}${detail ? ` ${detail}` : ''}`);
+}
+
 export function createClaudeLongRunner({
   spawnEnv = process.env,
   getProviderBin = () => 'claude',
@@ -124,11 +141,19 @@ export function createClaudeLongRunner({
   idleMs = 15 * 60_000,
   maxSessions = 8,
   spawnFn = spawn,
+  log = (message) => console.log(message),
 } = {}) {
   const entries = new Map();
 
   function closeEntry(entry, reason = 'closed') {
     if (!entry || entry.closed) return false;
+    logClaudeLongEvent(log, 'close', {
+      key: entry.key,
+      pid: entry.child?.pid ?? null,
+      sessionId: entry.sessionId,
+      reason,
+      active: Boolean(entry.currentTurn),
+    });
     entry.closed = true;
     if (entry.idleTimer) {
       clearTimeout(entry.idleTimer);
@@ -163,6 +188,12 @@ export function createClaudeLongRunner({
   function scheduleIdleClose(entry) {
     if (idleMs <= 0 || entry.closed) return;
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
+    logClaudeLongEvent(log, 'idle-scheduled', {
+      key: entry.key,
+      pid: entry.child?.pid ?? null,
+      sessionId: entry.sessionId,
+      idleMs,
+    });
     entry.idleTimer = setTimeout(() => {
       if (!entry.currentTurn) closeEntry(entry, 'idle timeout');
     }, idleMs);
@@ -237,6 +268,13 @@ export function createClaudeLongRunner({
       scheduleIdleClose(entry);
 
       const errors = Array.isArray(event.errors) ? event.errors.join('\n') : '';
+      logClaudeLongEvent(log, 'result', {
+        key: entry.key,
+        pid: entry.child?.pid ?? null,
+        sessionId: entry.sessionId,
+        ok: !event.is_error,
+        usageInputTokens: event.usage?.input_tokens ?? event.usage?.inputTokens ?? null,
+      });
       turn.resolve({
         ok: !event.is_error,
         cancelled: Boolean(turn.wasCancelled?.()),
@@ -258,6 +296,14 @@ export function createClaudeLongRunner({
     entry.child.on('close', (code, signal) => {
       if (entry.closed) return;
       const turn = entry.currentTurn;
+      logClaudeLongEvent(log, 'process-close', {
+        key: entry.key,
+        pid: entry.child?.pid ?? null,
+        sessionId: entry.sessionId,
+        code,
+        signal,
+        active: Boolean(turn),
+      });
       entry.closed = true;
       entries.delete(entry.key);
       if (entry.idleTimer) clearTimeout(entry.idleTimer);
@@ -305,6 +351,11 @@ export function createClaudeLongRunner({
           clearTimeout(existing.idleTimer);
           existing.idleTimer = null;
         }
+        logClaudeLongEvent(log, 'reuse', {
+          key,
+          pid: existing.child?.pid ?? null,
+          sessionId: existing.sessionId,
+        });
         return existing;
       }
       closeEntry(existing, 'runtime config changed');
@@ -338,6 +389,15 @@ export function createClaudeLongRunner({
     };
     entries.set(key, entry);
     attachLineHandlers(entry);
+    logClaudeLongEvent(log, 'spawn', {
+      key,
+      pid: child.pid ?? null,
+      sessionId: entry.sessionId,
+      cwd: workspaceDir,
+      mode: 'stream-json-stdin',
+      dashP: 'false',
+      args: formatArgs(args),
+    });
     return entry;
   }
 
@@ -402,6 +462,11 @@ export function createClaudeLongRunner({
     }
 
     onSpawn?.(entry.child);
+    logClaudeLongEvent(log, 'turn-start', {
+      key,
+      pid: entry.child?.pid ?? null,
+      sessionId: entry.sessionId,
+    });
 
     return new Promise((resolve) => {
       const timeoutMs = normalizeTimeoutMs(resolveTimeoutSetting(session).timeoutMs, 0);
@@ -431,10 +496,12 @@ export function createClaudeLongRunner({
 
       const payload = JSON.stringify({
         type: 'user',
+        session_id: entry.sessionId || '',
         message: {
           role: 'user',
           content: String(prompt || ''),
         },
+        parent_tool_use_id: null,
       }) + '\n';
 
       try {

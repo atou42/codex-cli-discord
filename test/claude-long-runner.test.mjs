@@ -55,6 +55,7 @@ function delay(ms) {
 
 test('Claude long runner resolves a turn on result and reuses the hot process for the same thread', async () => {
   const fake = createFakeSpawn();
+  const logs = [];
   const runner = createClaudeLongRunner({
     spawnFn: fake.spawnFn,
     getProviderBin: () => 'claude',
@@ -65,6 +66,7 @@ test('Claude long runner resolves a turn on result and reuses the hot process fo
     normalizeTimeoutMs: (value) => Number(value || 0),
     stopChildProcess: (child) => child.kill('SIGTERM'),
     idleMs: 10_000,
+    log: (line) => logs.push(line),
   });
 
   const first = runner.runTask({
@@ -92,6 +94,8 @@ test('Claude long runner resolves a turn on result and reuses the hot process fo
   assert.equal(firstResult.threadId, 'sess-1');
   assert.deepEqual(firstResult.finalAnswerMessages, ['answer one']);
   assert.equal(fake.children[0].killed, false);
+  assert.match(logs.join('\n'), /\[claude-long\] spawn .*mode=stream-json-stdin .*dashP=false/);
+  assert.match(logs.join('\n'), /\[claude-long\] result .*ok=true/);
 
   const second = runner.runTask({
     session: { provider: 'claude', mode: 'safe', runnerSessionId: 'sess-1' },
@@ -111,6 +115,7 @@ test('Claude long runner resolves a turn on result and reuses the hot process fo
   assert.equal(secondResult.ok, true);
   assert.deepEqual(secondResult.finalAnswerMessages, ['answer two']);
   assert.match(fake.writes[1], /"content":"again"/);
+  assert.match(logs.join('\n'), /\[claude-long\] reuse .*sessionId=sess-1/);
 });
 
 test('Claude long runner surfaces result errors instead of treating them as success', async () => {
@@ -124,6 +129,7 @@ test('Claude long runner surfaces result errors instead of treating them as succ
     resolveTimeoutSetting: () => ({ timeoutMs: 0 }),
     normalizeTimeoutMs: (value) => Number(value || 0),
     stopChildProcess: (child) => child.kill('SIGTERM'),
+    log: () => {},
   });
 
   const task = runner.runTask({
@@ -157,6 +163,7 @@ test('Claude long runner releases idle processes and resumes the saved session a
     normalizeTimeoutMs: (value) => Number(value || 0),
     stopChildProcess: (child) => child.kill('SIGTERM'),
     idleMs: 10,
+    log: () => {},
   });
 
   const first = runner.runTask({
