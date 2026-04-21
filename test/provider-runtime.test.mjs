@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   buildSpawnEnv,
@@ -94,6 +97,98 @@ test('getCodexAccountRateLimits reads official app-server rate limit response', 
   assert.deepEqual(spawnCalls, [
     { bin: '/bin/codex', args: ['app-server', '--listen', 'stdio://'] },
   ]);
+});
+
+test('getCodexAccountRateLimits includes account identity from local auth.json', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'codex-auth-home-'));
+  const codexDir = path.join(homeDir, '.codex');
+  await mkdir(codexDir, { recursive: true });
+  const idPayload = {
+    email: 'demo@example.com',
+    name: 'Demo User',
+    'https://api.openai.com/auth': {
+      chatgpt_plan_type: 'pro',
+      organizations: [{ title: 'Personal', is_default: true }],
+    },
+  };
+  const accessPayload = {
+    'https://api.openai.com/profile': {
+      email: 'demo@example.com',
+    },
+    'https://api.openai.com/auth': {
+      chatgpt_account_id: 'acct-123',
+      chatgpt_plan_type: 'pro',
+      organizations: [{ title: 'Personal', is_default: true }],
+    },
+  };
+  const encode = (payload) => {
+    const raw = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    return `header.${raw}.sig`;
+  };
+  await writeFile(path.join(codexDir, 'auth.json'), JSON.stringify({
+    auth_mode: 'chatgpt',
+    tokens: {
+      account_id: 'acct-123',
+      id_token: encode(idPayload),
+      access_token: encode(accessPayload),
+    },
+  }), 'utf8');
+
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.killed = false;
+    child.kill = (signal) => {
+      child.killed = true;
+      child.emit('exit', null, signal);
+    };
+    child.stdin = {
+      write(line) {
+        const message = JSON.parse(line);
+        if (message.id === 1) {
+          setImmediate(() => {
+            child.stdout.write(`${JSON.stringify({ id: 1, result: { userAgent: 'test' } })}\n`);
+          });
+        }
+        if (message.id === 2) {
+          setImmediate(() => {
+            child.stdout.write(`${JSON.stringify({
+              id: 2,
+              result: {
+                rateLimits: {
+                  limitId: 'codex',
+                  primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 1776169989 },
+                  secondary: { usedPercent: 34, windowDurationMins: 10080, resetsAt: 1776756789 },
+                  credits: null,
+                  planType: 'pro',
+                },
+                rateLimitsByLimitId: null,
+              },
+            })}\n`);
+          });
+        }
+      },
+    };
+    return child;
+  };
+
+  const result = await getCodexAccountRateLimits('codex', {
+    codexBin: '/bin/codex',
+    spawnEnv: { ...process.env, HOME: homeDir },
+    spawnImpl,
+    timeoutMs: 1000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.account, {
+    authMode: 'chatgpt',
+    email: 'demo@example.com',
+    name: 'Demo User',
+    planType: 'pro',
+    accountId: 'acct-123',
+    organizationTitle: 'Personal',
+  });
 });
 
 test('createCachedProviderRateLimitReader returns stale snapshot when live query fails after success', async () => {

@@ -251,6 +251,13 @@ test('createReportFormatters.formatStatusReportWithLiveData shows Codex 5h and w
   const formatters = createFormatters({
     getProviderRateLimits: async () => ({
       ok: true,
+      account: {
+        name: 'Demo User',
+        email: 'demo@example.com',
+        authMode: 'chatgpt',
+        planType: 'pro',
+        organizationTitle: 'Personal',
+      },
       rateLimits: {
         limitId: 'codex',
         primary: { usedPercent: 2, windowDurationMins: 300, resetsAt: 1776169989 },
@@ -268,13 +275,23 @@ test('createReportFormatters.formatStatusReportWithLiveData shows Codex 5h and w
     mode: 'safe',
   }, { id: 'channel-1' });
 
+  assert.match(report, /Codex 账号: Demo User <demo@example\.com> · chatgpt · pro · Personal/);
   assert.match(report, /Codex 5h 余量: 98%（已用 2%，重置 \d{4}-\d{2}-\d{2} \d{2}:\d{2}）/);
   assert.match(report, /Codex weekly 余量: 87\.5%（已用 12\.5%，重置 \d{4}-\d{2}-\d{2} \d{2}:\d{2}）/);
 });
 
 test('createReportFormatters.formatStatusReportWithLiveData shows Codex quota query failures', async () => {
   const formatters = createFormatters({
-    getProviderRateLimits: async () => ({ ok: false, error: 'login required' }),
+    getProviderRateLimits: async () => ({
+      ok: false,
+      error: 'login required',
+      account: {
+        email: 'demo@example.com',
+        authMode: 'chatgpt',
+        planType: 'pro',
+        organizationTitle: 'Personal',
+      },
+    }),
   });
 
   const report = await formatters.formatStatusReportWithLiveData('thread-1', {
@@ -283,6 +300,7 @@ test('createReportFormatters.formatStatusReportWithLiveData shows Codex quota qu
     mode: 'safe',
   }, { id: 'channel-1' });
 
+  assert.match(report, /Codex account: demo@example\.com · chatgpt · pro · Personal/);
   assert.match(report, /Codex quota: unavailable \(login required\)/);
 });
 

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 
 import {
   getProviderBinEnvName,
@@ -22,6 +23,69 @@ function truncateError(text, max = 220) {
 function cloneJsonLike(value) {
   if (!value || typeof value !== 'object') return value;
   return JSON.parse(JSON.stringify(value));
+}
+
+function decodeJwtPayload(token) {
+  const value = String(token || '').trim();
+  const parts = value.split('.');
+  if (parts.length < 2 || !parts[1]) return null;
+  try {
+    const normalized = parts[1]
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+      .padEnd(Math.ceil(parts[1].length / 4) * 4, '=');
+    return JSON.parse(Buffer.from(normalized, 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function readCodexAuthIdentity({
+  spawnEnv = process.env,
+  authFile = null,
+} = {}) {
+  const homeDir = authFile
+    ? null
+    : (spawnEnv?.HOME || spawnEnv?.USERPROFILE || process.env.HOME || process.env.USERPROFILE || '');
+  const resolvedAuthFile = authFile || (homeDir ? path.join(homeDir, '.codex', 'auth.json') : '');
+  if (!resolvedAuthFile) return null;
+
+  try {
+    const raw = await readFile(resolvedAuthFile, 'utf8');
+    const parsed = JSON.parse(raw);
+    const tokens = parsed?.tokens && typeof parsed.tokens === 'object' ? parsed.tokens : {};
+    const idTokenPayload = decodeJwtPayload(tokens.id_token);
+    const accessTokenPayload = decodeJwtPayload(tokens.access_token);
+    const authClaims = accessTokenPayload?.['https://api.openai.com/auth']
+      || idTokenPayload?.['https://api.openai.com/auth']
+      || {};
+    const profileClaims = accessTokenPayload?.['https://api.openai.com/profile'] || {};
+    const organizations = Array.isArray(authClaims.organizations) ? authClaims.organizations : [];
+    const primaryOrg = organizations.find((item) => item?.is_default) || organizations[0] || null;
+    const email = profileClaims.email
+      || idTokenPayload?.email
+      || null;
+    const name = idTokenPayload?.name || null;
+    const planType = authClaims.chatgpt_plan_type || null;
+    const accountId = tokens.account_id || authClaims.chatgpt_account_id || null;
+    const orgTitle = primaryOrg?.title || null;
+    const authMode = parsed?.auth_mode || null;
+
+    if (!authMode && !email && !name && !planType && !accountId && !orgTitle) {
+      return null;
+    }
+
+    return {
+      authMode,
+      email,
+      name,
+      planType,
+      accountId,
+      organizationTitle: orgTitle,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function buildSpawnEnv(env) {
@@ -165,6 +229,8 @@ export async function getCodexAccountRateLimits(provider = 'codex', {
     };
   }
 
+  const account = await readCodexAuthIdentity({ spawnEnv });
+
   return new Promise((resolve) => {
     let child = null;
     let stdoutBuffer = '';
@@ -179,7 +245,9 @@ export async function getCodexAccountRateLimits(provider = 'codex', {
       if (child && !child.killed) {
         child.kill('SIGTERM');
       }
-      resolve(payload);
+      resolve(account && payload && typeof payload === 'object'
+        ? { ...payload, account: payload.account || account }
+        : payload);
     };
 
     const timer = setTimeout(() => {
@@ -235,6 +303,7 @@ export async function getCodexAccountRateLimits(provider = 'codex', {
         }
         finish({
           ok: true,
+          account,
           ...message.result,
         });
       }

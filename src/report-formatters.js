@@ -229,24 +229,55 @@ export function createReportFormatters({
     return `• Codex ${label} 余量: ${remaining}%（已用 ${usedText}%，重置 ${resetAt}）`;
   }
 
+  function formatCodexAccountLine(rateLimitReport, language = 'en') {
+    const account = rateLimitReport?.account;
+    if (!account) return null;
+    const pieces = [];
+    const name = String(account.name || '').trim();
+    const email = String(account.email || '').trim();
+    const authMode = String(account.authMode || '').trim();
+    const planType = String(account.planType || '').trim();
+    const orgTitle = String(account.organizationTitle || '').trim();
+
+    if (name && email) {
+      pieces.push(`${name} <${email}>`);
+    } else if (email) {
+      pieces.push(email);
+    } else if (name) {
+      pieces.push(name);
+    }
+
+    if (authMode) pieces.push(authMode);
+    if (planType) pieces.push(planType);
+    if (orgTitle) pieces.push(orgTitle);
+
+    if (!pieces.length) return null;
+    return language === 'en'
+      ? `• Codex account: ${pieces.join(' · ')}`
+      : `• Codex 账号: ${pieces.join(' · ')}`;
+  }
+
   function formatCodexRateLimitLines(provider, rateLimitReport, language = 'en') {
     if (provider !== 'codex' || !rateLimitReport) return [];
+    const accountLine = formatCodexAccountLine(rateLimitReport, language);
     if (rateLimitReport.ok === false) {
       const error = String(rateLimitReport.error || 'unknown error').replace(/\s+/g, ' ').trim();
       return [
+        accountLine,
         language === 'en'
           ? `• Codex quota: unavailable (${error || 'unknown error'})`
           : `• Codex 额度: 暂不可用（${error || '未知错误'}）`,
-      ];
+      ].filter(Boolean);
     }
 
     const snapshot = selectCodexRateLimitSnapshot(rateLimitReport);
     if (!snapshot) {
       return [
+        accountLine,
         language === 'en'
           ? '• Codex quota: unavailable (empty rate limit response)'
           : '• Codex 额度: 暂不可用（返回为空）',
-      ];
+      ].filter(Boolean);
     }
 
     const staleLine = rateLimitReport.stale
@@ -260,6 +291,7 @@ export function createReportFormatters({
       : null;
 
     return [
+      accountLine,
       staleLine,
       formatRateLimitWindowLine('5h', snapshot.primary, language),
       formatRateLimitWindowLine('weekly', snapshot.secondary, language),
