@@ -1,4 +1,5 @@
 import { createPromptResultRenderer } from './prompt-result-renderer.js';
+import { buildNativeImagePromptNote, stageNativeImageAttachments } from './native-image-inputs.js';
 import { withRetryAction } from './retry-action-button.js';
 
 function defaultSleep(ms) {
@@ -56,6 +57,22 @@ export function createPromptOrchestrator({
   extractInputTokensFromUsage,
   composeFinalAnswerText,
   sleep = defaultSleep,
+  prepareNativeInputs = async ({ message, session }) => {
+    const provider = String(getSessionProvider(session) || '').trim().toLowerCase();
+    if (provider !== 'codex') {
+      return {
+        inputImages: [],
+        promptNote: '',
+        notes: [],
+        cleanup: async () => {},
+      };
+    }
+    const staged = await stageNativeImageAttachments(message, { safeError });
+    return {
+      ...staged,
+      promptNote: buildNativeImagePromptNote(staged.inputImages),
+    };
+  },
 } = {}) {
   const { composeResultText } = createPromptResultRenderer({
     showReasoning,
@@ -253,6 +270,12 @@ export function createPromptOrchestrator({
     }, 8000);
     await progress.start();
     let progressOutcome = { ok: false, cancelled: false, timedOut: false, error: '' };
+    let nativeInputs = {
+      inputImages: [],
+      promptNote: '',
+      notes: [],
+      cleanup: async () => {},
+    };
 
     const releaseWorkspaceLock = () => {
       if (!workspaceLock?.acquired || typeof workspaceLock.release !== 'function') return;
@@ -312,11 +335,22 @@ export function createPromptOrchestrator({
         return { ok: false, cancelled: true };
       }
 
+      nativeInputs = await prepareNativeInputs({
+        message,
+        session,
+        workspaceDir,
+        prompt,
+      });
+      if (nativeInputs.promptNote) {
+        promptToRun = `${promptToRun}\n\n${nativeInputs.promptNote}`;
+      }
+
       const runPromptAttempt = async ({ promptText, phase }) => runTask({
         session,
         sessionKey: key,
         workspaceDir,
         prompt: promptText,
+        inputImages: nativeInputs.inputImages,
         onSpawn: (child) => {
           setActiveRun(channelState, message, promptText, child, phase);
           progress.sync({ forceEmit: true });
@@ -328,7 +362,7 @@ export function createPromptOrchestrator({
       });
 
       const retryEvents = [];
-      const runtimeNotes = [];
+      const runtimeNotes = Array.isArray(nativeInputs.notes) ? [...nativeInputs.notes] : [];
       let nativeCompactSwitchedDuringRetry = false;
       let attemptNumber = 1;
       let result = await runPromptAttempt({
@@ -536,7 +570,11 @@ export function createPromptOrchestrator({
     } finally {
       releaseWorkspaceLock();
       clearInterval(typingInterval);
-      await progress.finish(progressOutcome);
+      try {
+        await progress.finish(progressOutcome);
+      } finally {
+        await nativeInputs.cleanup().catch(() => {});
+      }
     }
   }
 

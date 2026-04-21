@@ -71,7 +71,17 @@ export function createRunnerExecutor({
     maxSessions: claudeLongMaxSessions,
   });
 
-  async function runProviderTask({ session, sessionKey = null, workspaceDir, prompt, onSpawn, wasCancelled, onEvent, onLog }) {
+  async function runProviderTask({
+    session,
+    sessionKey = null,
+    workspaceDir,
+    prompt,
+    inputImages = [],
+    onSpawn,
+    wasCancelled,
+    onEvent,
+    onLog,
+  }) {
     ensureDir(workspaceDir);
 
     const provider = getSessionProvider(session);
@@ -95,7 +105,7 @@ export function createRunnerExecutor({
       });
     }
 
-    const args = buildSessionRunnerArgs({ provider, session, workspaceDir, prompt, additionalWorkspaceDirs });
+    const args = buildSessionRunnerArgs({ provider, session, workspaceDir, prompt, additionalWorkspaceDirs, inputImages });
     const timeoutMs = resolveTimeoutSetting(session).timeoutMs;
     const bin = getProviderBin(provider);
 

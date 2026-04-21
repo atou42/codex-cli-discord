@@ -29,7 +29,7 @@ export function createRunnerArgsBuilder({
 } = {}) {
   const providerAdapters = createProviderAdapterRegistry([
     createCodexProviderAdapter({
-      buildArgs: ({ session, workspaceDir, prompt }) => buildCodexArgs({ session, workspaceDir, prompt }),
+      buildArgs: ({ session, workspaceDir, prompt, inputImages = [] }) => buildCodexArgs({ session, workspaceDir, prompt, inputImages }),
     }),
     createClaudeProviderAdapter({
       buildArgs: ({ session, workspaceDir, prompt, additionalWorkspaceDirs = [] }) => buildClaudeArgs({
@@ -44,12 +44,12 @@ export function createRunnerArgsBuilder({
     }),
   ]);
 
-  function buildSessionRunnerArgs({ provider, session, workspaceDir, prompt, additionalWorkspaceDirs = [] }) {
+  function buildSessionRunnerArgs({ provider, session, workspaceDir, prompt, additionalWorkspaceDirs = [], inputImages = [] }) {
     const adapter = providerAdapters.get(provider);
-    return adapter.runtime.buildArgs({ session, workspaceDir, prompt, additionalWorkspaceDirs });
+    return adapter.runtime.buildArgs({ session, workspaceDir, prompt, additionalWorkspaceDirs, inputImages });
   }
 
-  function buildCodexArgs({ session, workspaceDir, prompt }) {
+  function buildCodexArgs({ session, workspaceDir, prompt, inputImages = [] }) {
     const modeFlag = session.mode === 'dangerous'
       ? '--dangerously-bypass-approvals-and-sandbox'
       : '--full-auto';
@@ -76,6 +76,10 @@ export function createRunnerArgsBuilder({
       common.push('-c', `model_auto_compact_token_limit=${nativeLimit.tokens}`);
     }
     for (const cfg of extraConfigs) common.push('-c', cfg);
+    for (const imagePath of inputImages) {
+      const value = String(imagePath || '').trim();
+      if (value) common.push('--image', value);
+    }
 
     if (sessionId) {
       return ['exec', 'resume', '--json', modeFlag, ...common, sessionId, prompt];

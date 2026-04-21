@@ -126,6 +126,47 @@ test('createRunnerArgsBuilder keeps native compact config for resumed codex sess
   ]);
 });
 
+test('createRunnerArgsBuilder passes native image inputs to codex exec', () => {
+  const { buildSessionRunnerArgs } = createRunnerArgsBuilder({
+    defaultModel: 'gpt-5-codex',
+    normalizeProvider: (value) => value,
+    getSessionId: () => null,
+    resolveFastModeSetting: () => ({ enabled: false, source: 'config.toml' }),
+    resolveCompactStrategySetting: () => ({ strategy: 'hard' }),
+    resolveCompactEnabledSetting: () => ({ enabled: false }),
+    resolveNativeCompactTokenLimitSetting: () => ({ tokens: 0 }),
+  });
+
+  const args = buildSessionRunnerArgs({
+    provider: 'codex',
+    session: {
+      mode: 'safe',
+      configOverrides: [],
+    },
+    workspaceDir: '/tmp/workspace',
+    prompt: 'inspect',
+    inputImages: ['/tmp/image-a.jpg', '/tmp/image-b.png'],
+  });
+
+  assert.deepEqual(args, [
+    'exec',
+    '--json',
+    '--skip-git-repo-check',
+    '--full-auto',
+    '-C',
+    '/tmp/workspace',
+    '-m',
+    'gpt-5-codex',
+    '-c',
+    'features.fast_mode=false',
+    '--image',
+    '/tmp/image-a.jpg',
+    '--image',
+    '/tmp/image-b.png',
+    'inspect',
+  ]);
+});
+
 test('createRunnerArgsBuilder passes fast mode through when inherited from the parent channel', () => {
   const { buildSessionRunnerArgs } = createRunnerArgsBuilder({
     defaultModel: 'gpt-5-codex',
