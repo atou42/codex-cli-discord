@@ -595,6 +595,7 @@ const appContext = createAppContext({
       ActionRowBuilder,
       ButtonBuilder,
       ButtonStyle,
+      StringSelectMenuBuilder,
       ModalBuilder,
       TextInputBuilder,
       TextInputStyle,

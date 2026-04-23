@@ -40,6 +40,27 @@ class FakeActionRowBuilder {
   }
 }
 
+class FakeStringSelectMenuBuilder {
+  constructor() {
+    this.data = { options: [] };
+  }
+
+  setCustomId(value) {
+    this.data.customId = value;
+    return this;
+  }
+
+  setPlaceholder(value) {
+    this.data.placeholder = value;
+    return this;
+  }
+
+  addOptions(...options) {
+    this.data.options.push(...options.flat());
+    return this;
+  }
+}
+
 class FakeModalBuilder {
   constructor() {
     this.data = { components: [] };
@@ -120,6 +141,7 @@ function createPanel({ session, botProvider = null, openWorkspaceBrowser, comman
     ActionRowBuilder: FakeActionRowBuilder,
     ButtonBuilder: FakeButtonBuilder,
     ButtonStyle,
+    StringSelectMenuBuilder: FakeStringSelectMenuBuilder,
     ModalBuilder: FakeModalBuilder,
     TextInputBuilder: FakeTextInputBuilder,
     TextInputStyle,
@@ -192,6 +214,13 @@ function createPanel({ session, botProvider = null, openWorkspaceBrowser, comman
       strategy: currentSession?.compactStrategy || 'native',
       source: currentSession?.compactStrategy ? 'session override' : 'env default',
     }),
+    resolveCompactThresholdSetting: (currentSession) => ({
+      tokens: currentSession?.compactThresholdTokens ?? currentSession?.inheritedCompactThresholdTokens ?? 272000,
+      source: currentSession?.compactThresholdSource
+        || ((currentSession?.compactThresholdTokens ?? currentSession?.inheritedCompactThresholdTokens) !== undefined
+          ? (currentSession?.compactThresholdTokens !== null && currentSession?.compactThresholdTokens !== undefined ? 'session override' : 'parent channel')
+          : 'env default'),
+    }),
     resolveReplyDeliverySetting: (currentSession) => ({
       mode: currentSession?.replyDeliveryMode || currentSession?.inheritedReplyDeliveryMode || 'card_only',
       source: currentSession?.replyDeliverySource
@@ -232,10 +261,10 @@ test('createSettingsPanel opens an overview payload with key channel settings', 
   assert.match(payload.content, /provider：`codex`/);
   assert.match(payload.content, /Codex profile：`work`（当前频道）/);
   assert.match(payload.content, /model：`gpt-5.4`/);
-  assert.equal(payload.components.length, 3);
-  const labels = payload.components.flatMap((row) => row.components.map((button) => button.data.label));
-  assert.ok(labels.includes('默认'));
-  assert.equal(labels.at(-1), '关闭');
+  assert.equal(payload.components.length, 2);
+  assert.equal(payload.components[0].components[0].data.customId, 'stg:nav:section:picker:12345');
+  assert.equal(payload.components[0].components[0].data.placeholder, '选择设置分区');
+  assert.equal(payload.components[1].components[0].data.label, '关闭');
 });
 
 test('createSettingsPanel defaults to the global codex defaults section', () => {
@@ -254,7 +283,39 @@ test('createSettingsPanel defaults to the global codex defaults section', () => 
 
   assert.match(payload.content, /Codex 默认设置/);
   assert.match(payload.content, /作用域：`~\/.codex\/config\.toml`/);
-  assert.match(payload.content, /当前项：defaults/);
+  assert.match(payload.content, /当前项：Codex 默认/);
+  assert.match(payload.content, /effort 和 fast 直接在这里改/);
+  assert.equal(payload.components.length, 5);
+  assert.equal(payload.components[1].components[0].data.customId, 'stg:act:default_profile:custom:12345');
+  assert.equal(payload.components[1].components[1].data.customId, 'stg:act:default_model:custom:12345');
+  assert.equal(payload.components[2].components.length, 5);
+  assert.equal(payload.components[3].components[0].data.customId, 'stg:set:default_fast:default:12345');
+});
+
+test('createSettingsPanel switches active section through the section picker', async () => {
+  const session = {
+    provider: 'codex',
+    language: 'zh',
+    mode: 'safe',
+  };
+  const updates = [];
+  const panel = createPanel({ session });
+
+  await panel.handleSettingsPanelInteraction({
+    customId: 'stg:nav:section:picker:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    values: ['compact'],
+    async update(payload) {
+      updates.push(payload);
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+  });
+
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].content, /当前项：上下文压缩/);
 });
 
 test('createSettingsPanel updates fast mode through button interaction', async () => {
@@ -292,7 +353,7 @@ test('createSettingsPanel updates fast mode through button interaction', async (
 
   assert.equal(session.fastMode, true);
   assert.equal(updates.length, 1);
-  assert.match(updates[0].content, /当前项：fast/);
+  assert.match(updates[0].content, /当前项：Fast Mode/);
   assert.match(updates[0].content, /fast mode：开启（当前频道）/);
 });
 
@@ -335,7 +396,7 @@ test('createSettingsPanel updates reply delivery and shows effective source', as
   });
 
   assert.equal(session.replyDeliveryMode, 'stream_mention');
-  assert.match(updates[0].content, /当前项：reply/);
+  assert.match(updates[0].content, /当前项：回复方式/);
   assert.match(updates[0].content, /回复方式：发送过程消息，完成时触发 @（当前频道）/);
   assert.match(updates[0].content, /默认回复方式：只更新进度卡，完成时触发 @（环境默认）/);
 });
@@ -357,6 +418,7 @@ test('createSettingsPanel updates Claude runtime mode and closes the hot process
     ActionRowBuilder: FakeActionRowBuilder,
     ButtonBuilder: FakeButtonBuilder,
     ButtonStyle,
+    StringSelectMenuBuilder: FakeStringSelectMenuBuilder,
     ModalBuilder: FakeModalBuilder,
     TextInputBuilder: FakeTextInputBuilder,
     TextInputStyle,
@@ -408,7 +470,7 @@ test('createSettingsPanel updates Claude runtime mode and closes the hot process
   assert.equal(session.runtimeMode, 'long');
   assert.equal(session.runnerSessionId, 'sess-claude');
   assert.deepEqual(closed, [{ key: 'thread-1', reason: 'runtime config changed' }]);
-  assert.match(updates[0].content, /当前项：runtime/);
+  assert.match(updates[0].content, /当前项：Claude Runtime/);
   assert.match(updates[0].content, /Claude runtime：long/);
 });
 
@@ -569,6 +631,48 @@ test('createSettingsPanel opens codex profile modals from profile and defaults s
   assert.equal(modals[1].data.components[0].components[0].data.value, 'review');
 });
 
+test('createSettingsPanel shows compact threshold in the panel and opens compact threshold modal', async () => {
+  const session = {
+    provider: 'codex',
+    language: 'zh',
+    mode: 'safe',
+    compactStrategy: 'native',
+    compactThresholdTokens: 333000,
+  };
+  const modals = [];
+  const panel = createPanel({ session });
+
+  const payload = panel.openSettingsPanel({
+    key: 'thread-1',
+    session,
+    userId: '12345',
+    activeSection: 'compact',
+  });
+
+  assert.match(payload.content, /compact 阈值：333000（当前频道）/);
+  assert.match(payload.content, /当前项：上下文压缩/);
+
+  await panel.handleSettingsPanelInteraction({
+    customId: 'stg:act:compact_threshold:custom:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    async update() {
+      throw new Error('should not update');
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+    async showModal(modal) {
+      modals.push(modal);
+    },
+  });
+
+  assert.equal(modals.length, 1);
+  assert.equal(modals[0].data.customId, 'stgm:compact_threshold:12345');
+  assert.equal(modals[0].data.components[0].components[0].data.customId, 'compact_threshold_tokens');
+  assert.equal(modals[0].data.components[0].components[0].data.value, '333000');
+});
+
 test('createSettingsPanel applies model modal submit and replies with a refreshed panel', async () => {
   const session = {
     provider: 'codex',
@@ -608,6 +712,125 @@ test('createSettingsPanel applies model modal submit and replies with a refreshe
   assert.match(replies[0].content, /model: `o3` \(this channel\)/);
 });
 
+test('createSettingsPanel applies compact threshold modal submit and refreshes compact section', async () => {
+  const session = {
+    provider: 'codex',
+    language: 'en',
+    mode: 'safe',
+    compactStrategy: 'native',
+    compactThresholdTokens: null,
+  };
+  const replies = [];
+  const panel = createPanel({
+    session,
+    commandActions: {
+      applyCompactConfig(currentSession, parsed) {
+        if (parsed.type === 'set_threshold') currentSession.compactThresholdTokens = parsed.tokens;
+        return { compactThresholdTokens: currentSession.compactThresholdTokens };
+      },
+    },
+  });
+
+  await panel.handleSettingsPanelModalSubmit({
+    customId: 'stgm:compact_threshold:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    fields: {
+      getTextInputValue() {
+        return '320000';
+      },
+    },
+    async reply(payload) {
+      replies.push(payload);
+    },
+  });
+
+  assert.equal(session.compactThresholdTokens, 320000);
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].flags, 64);
+  assert.match(replies[0].content, /Compact token limit updated/);
+  assert.match(replies[0].content, /compact token limit: 320000 \(this channel\)/);
+  assert.match(replies[0].content, /Active: Context Compaction/);
+});
+
+test('createSettingsPanel clears compact threshold override through button interaction', async () => {
+  const session = {
+    provider: 'codex',
+    language: 'zh',
+    mode: 'safe',
+    compactStrategy: 'native',
+    compactThresholdTokens: 320000,
+  };
+  const updates = [];
+  const panel = createPanel({
+    session,
+    commandActions: {
+      applyCompactConfig(currentSession, parsed) {
+        if (parsed.type === 'set_threshold') currentSession.compactThresholdTokens = parsed.tokens;
+        return { compactThresholdTokens: currentSession.compactThresholdTokens };
+      },
+    },
+  });
+
+  await panel.handleSettingsPanelInteraction({
+    customId: 'stg:act:compact_threshold:default:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    async update(payload) {
+      updates.push(payload);
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+    async showModal() {
+      throw new Error('should not show modal');
+    },
+  });
+
+  assert.equal(session.compactThresholdTokens, null);
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].content, /compact 阈值已改为跟随默认/);
+  assert.match(updates[0].content, /compact 阈值：272000（环境默认）/);
+});
+
+test('createSettingsPanel rejects invalid compact threshold input', async () => {
+  const session = {
+    provider: 'codex',
+    language: 'en',
+    mode: 'safe',
+    compactThresholdTokens: 320000,
+  };
+  const replies = [];
+  const panel = createPanel({
+    session,
+    commandActions: {
+      applyCompactConfig() {
+        throw new Error('should not apply invalid compact threshold');
+      },
+    },
+  });
+
+  await panel.handleSettingsPanelModalSubmit({
+    customId: 'stgm:compact_threshold:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    fields: {
+      getTextInputValue() {
+        return 'oops';
+      },
+    },
+    async reply(payload) {
+      replies.push(payload);
+    },
+  });
+
+  assert.equal(session.compactThresholdTokens, 320000);
+  assert.deepEqual(replies, [{
+    content: '❌ Invalid compact token limit. Use a positive integer or `default`.',
+    flags: 64,
+  }]);
+});
+
 test('createSettingsPanel updates global effort defaults through button interaction', async () => {
   const session = {
     provider: 'codex',
@@ -645,7 +868,7 @@ test('createSettingsPanel updates global effort defaults through button interact
 
   assert.equal(session.globalDefaultEffort, 'xhigh');
   assert.equal(updates.length, 1);
-  assert.match(updates[0].content, /当前项：defaults/);
+  assert.match(updates[0].content, /当前项：Codex 默认/);
   assert.match(updates[0].content, /effort 默认：`xhigh`（全局配置）/);
 });
 

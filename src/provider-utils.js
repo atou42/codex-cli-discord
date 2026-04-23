@@ -8,6 +8,7 @@ import {
   providerSupportsCompactStrategy,
   providerSupportsNativeCompact,
 } from './provider-metadata.js';
+import { buildCodexPermissionArgs } from './codex-permissions.js';
 
 export {
   normalizeCliProvider,
@@ -81,10 +82,6 @@ function buildCodexArgs({
   compactOnThreshold,
   modelAutoCompactTokenLimit,
 }) {
-  const modeFlag = mode === 'dangerous'
-    ? '--dangerously-bypass-approvals-and-sandbox'
-    : '--full-auto';
-
   const common = [];
   if (model) common.push('-m', model);
   if (effort) common.push('-c', `model_reasoning_effort="${effort}"`);
@@ -97,10 +94,10 @@ function buildCodexArgs({
   for (const cfg of extraConfigs || []) common.push('-c', cfg);
 
   if (sessionId) {
-    return ['exec', 'resume', '--json', modeFlag, ...common, sessionId, prompt];
+    return ['exec', 'resume', '--json', ...buildCodexPermissionArgs(mode, { resume: true }), ...common, sessionId, prompt];
   }
 
-  return ['exec', '--json', '--skip-git-repo-check', modeFlag, '-C', workspaceDir, ...common, prompt];
+  return ['exec', '--json', '--skip-git-repo-check', ...buildCodexPermissionArgs(mode, { resume: false }), '-C', workspaceDir, ...common, prompt];
 }
 
 function buildClaudeArgs({

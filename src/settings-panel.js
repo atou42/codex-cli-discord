@@ -1,9 +1,10 @@
-import { formatCodexProfileLabel, formatReplyDeliveryModeLabel } from './session-settings.js';
+import { formatCodexProfileLabel, formatReplyDeliveryModeLabel, parseCompactConfigAction } from './session-settings.js';
 
 const SETTINGS_COMPONENT_PREFIX = 'stg';
 const SETTINGS_MODAL_PREFIX = 'stgm';
 const MODEL_INPUT_ID = 'model_name';
 const CODEX_PROFILE_INPUT_ID = 'codex_profile_name';
+const COMPACT_THRESHOLD_INPUT_ID = 'compact_threshold_tokens';
 
 const ALL_SECTIONS = Object.freeze([
   'overview',
@@ -108,18 +109,37 @@ function formatSectionButtonLabel(section, language) {
   const labels = {
     overview: { en: 'overview', zh: '总览' },
     defaults: { en: 'defaults', zh: '默认' },
-    provider: { en: 'provider', zh: 'provider' },
-    profile: { en: 'profile', zh: 'profile' },
-    model: { en: 'model', zh: 'model' },
+    provider: { en: 'provider', zh: '后端' },
+    profile: { en: 'profile', zh: '配置' },
+    model: { en: 'model', zh: '模型' },
     fast: { en: 'fast', zh: 'fast' },
-    runtime: { en: 'runtime', zh: 'runtime' },
-    effort: { en: 'effort', zh: 'effort' },
-    compact: { en: 'compact', zh: 'compact' },
+    runtime: { en: 'runtime', zh: '运行时' },
+    effort: { en: 'effort', zh: '推理' },
+    compact: { en: 'compact', zh: '压缩' },
     reply: { en: 'reply', zh: '回复' },
     language: { en: 'language', zh: '语言' },
-    mode: { en: 'mode', zh: 'mode' },
-    workspace: { en: 'workspace', zh: 'workspace' },
+    mode: { en: 'mode', zh: '执行' },
+    workspace: { en: 'workspace', zh: '目录' },
     close: { en: 'close', zh: '关闭' },
+  };
+  return labels[section]?.[language] || section;
+}
+
+function formatSectionTitleLabel(section, language) {
+  const labels = {
+    overview: { en: 'Overview', zh: '总览' },
+    defaults: { en: 'Codex Defaults', zh: 'Codex 默认' },
+    provider: { en: 'Provider', zh: 'Provider' },
+    profile: { en: 'Codex Profile', zh: 'Codex Profile' },
+    model: { en: 'Model', zh: '模型' },
+    fast: { en: 'Fast Mode', zh: 'Fast Mode' },
+    runtime: { en: 'Claude Runtime', zh: 'Claude Runtime' },
+    effort: { en: 'Reasoning Effort', zh: '推理力度' },
+    compact: { en: 'Context Compaction', zh: '上下文压缩' },
+    reply: { en: 'Reply Delivery', zh: '回复方式' },
+    language: { en: 'Language', zh: '语言' },
+    mode: { en: 'Execution Mode', zh: '执行模式' },
+    workspace: { en: 'Workspace', zh: '工作目录' },
   };
   return labels[section]?.[language] || section;
 }
@@ -183,6 +203,7 @@ export function createSettingsPanel({
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -202,6 +223,7 @@ export function createSettingsPanel({
   resolveFastModeSetting = () => ({ enabled: false, supported: false, source: 'provider unsupported' }),
   resolveRuntimeModeSetting = () => ({ mode: 'normal', supported: false, source: 'provider unsupported' }),
   resolveCompactStrategySetting = () => ({ strategy: 'native', source: 'env default' }),
+  resolveCompactThresholdSetting = () => ({ tokens: 0, source: 'env default' }),
   resolveReplyDeliverySetting = () => ({ mode: 'card_mention', source: 'env default' }),
   getReplyDeliveryDefault = () => ({ mode: 'card_mention', source: 'env default' }),
   commandActions = {},
@@ -253,6 +275,7 @@ export function createSettingsPanel({
     const fastMode = resolveFastModeSetting(session);
     const runtimeMode = resolveRuntimeModeSetting(session);
     const compact = resolveCompactStrategySetting(session);
+    const compactThreshold = resolveCompactThresholdSetting(session);
     const replyDelivery = resolveReplyDeliverySetting(session);
     const replyDefault = getReplyDeliveryDefault(session);
     const workspace = getWorkspaceBinding(session, key) || { workspaceDir: null, source: 'unset' };
@@ -270,6 +293,7 @@ export function createSettingsPanel({
       fastMode,
       runtimeMode,
       compact,
+      compactThreshold,
       replyDelivery,
       replyDefault,
       workspace,
@@ -281,29 +305,33 @@ export function createSettingsPanel({
     };
   }
 
-  function buildSectionButtons(session, userId, activeSection) {
+  function buildSectionNavigation(session, userId, activeSection) {
     const language = normalizeUiLanguage(getSessionLanguage(session) || defaultUiLanguage);
     const available = getAvailableSections(session);
-    const buttons = [];
+    return [
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(buildSettingsComponentId('nav', 'section', 'picker', userId))
+          .setPlaceholder(language === 'en' ? 'Choose a settings section' : '选择设置分区')
+          .addOptions(
+            available.map((section) => ({
+              label: formatSectionTitleLabel(section, language),
+              value: section,
+              default: activeSection === section,
+            })),
+          ),
+      ),
+    ];
+  }
 
-    for (const section of ['overview', 'defaults', 'provider', 'profile', 'model', 'fast', 'runtime', 'effort', 'compact', 'reply', 'language', 'mode', 'workspace']) {
-      if (!available.includes(section)) continue;
-      buttons.push(
-        new ButtonBuilder()
-          .setCustomId(buildSettingsComponentId('nav', section, '_', userId))
-          .setLabel(formatSectionButtonLabel(section, language))
-          .setStyle(activeSection === section ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      );
-    }
-
-    buttons.push(
+  function buildCloseRow(session, userId) {
+    const language = normalizeUiLanguage(getSessionLanguage(session) || defaultUiLanguage);
+    return new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(buildSettingsComponentId('act', 'panel', 'close', userId))
         .setLabel(formatSectionButtonLabel('close', language))
         .setStyle(ButtonStyle.Danger),
     );
-
-    return chunk(buttons, 5).map((rowButtons) => new ActionRowBuilder().addComponents(...rowButtons));
   }
 
   function buildSectionControls(key, session, userId, activeSection, snapshot) {
@@ -323,32 +351,19 @@ export function createSettingsPanel({
       case 'defaults': {
         if (snapshot.provider !== 'codex' || !snapshot.codexDefaults) return [];
 
-        const modelUsesProviderDefault = !snapshot.codexDefaults.modelConfigured;
-        const profileUsesProviderDefault = !snapshot.codexDefaults.profileConfigured;
         const defaultFastSelected = !snapshot.codexDefaults.fastModeConfigured
           ? 'default'
           : (snapshot.codexDefaults.fastMode ? 'on' : 'off');
-
         return [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
               .setCustomId(buildSettingsComponentId('act', 'default_profile', 'custom', userId))
-              .setLabel(snapshot.language === 'en' ? 'Set default profile' : '设置默认 profile')
+              .setLabel(snapshot.language === 'en' ? 'Set profile' : '设置 profile')
               .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-              .setCustomId(buildSettingsComponentId('act', 'default_profile', 'default', userId))
-              .setLabel(snapshot.language === 'en' ? 'Use provider default' : '使用 provider 默认')
-              .setStyle(profileUsesProviderDefault ? ButtonStyle.Primary : ButtonStyle.Secondary),
-          ),
-          new ActionRowBuilder().addComponents(
             new ButtonBuilder()
               .setCustomId(buildSettingsComponentId('act', 'default_model', 'custom', userId))
-              .setLabel(snapshot.language === 'en' ? 'Set default model' : '设置默认 model')
+              .setLabel(snapshot.language === 'en' ? 'Set model' : '设置 model')
               .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-              .setCustomId(buildSettingsComponentId('act', 'default_model', 'default', userId))
-              .setLabel(snapshot.language === 'en' ? 'Use provider default' : '使用 provider 默认')
-              .setStyle(modelUsesProviderDefault ? ButtonStyle.Primary : ButtonStyle.Secondary),
           ),
           ...chunk([...snapshot.effortLevels, 'default'], 5).map((rowValues) => new ActionRowBuilder().addComponents(
             ...rowValues.map((value) => {
@@ -364,7 +379,7 @@ export function createSettingsPanel({
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
               .setCustomId(buildSettingsComponentId('set', 'default_fast', 'default', userId))
-              .setLabel(snapshot.language === 'en' ? 'Default on' : '默认开启')
+              .setLabel(snapshot.language === 'en' ? 'Use built-in default' : '使用内建默认')
               .setStyle(defaultFastSelected === 'default' ? ButtonStyle.Primary : ButtonStyle.Secondary),
             new ButtonBuilder()
               .setCustomId(buildSettingsComponentId('set', 'default_fast', 'on', userId))
@@ -499,6 +514,7 @@ export function createSettingsPanel({
       case 'compact': {
         const compactCapabilities = getProviderCompactCapabilities(snapshot.provider);
         const values = ['follow', ...compactCapabilities.strategies];
+        const thresholdUsesDefault = session?.compactThresholdTokens === null || session?.compactThresholdTokens === undefined;
         return [
           new ActionRowBuilder().addComponents(
             ...values.map((value) => {
@@ -513,6 +529,16 @@ export function createSettingsPanel({
                 .setLabel(label)
                 .setStyle(selected ? ButtonStyle.Primary : ButtonStyle.Secondary);
             }),
+          ),
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(buildSettingsComponentId('act', 'compact_threshold', 'custom', userId))
+              .setLabel(snapshot.language === 'en' ? 'Set token limit' : '设置阈值')
+              .setStyle(ButtonStyle.Success),
+            new ButtonBuilder()
+              .setCustomId(buildSettingsComponentId('act', 'compact_threshold', 'default', userId))
+              .setLabel(snapshot.language === 'en' ? 'Follow default limit' : '跟随默认阈值')
+              .setStyle(thresholdUsesDefault ? ButtonStyle.Primary : ButtonStyle.Secondary),
           ),
         ];
       }
@@ -579,28 +605,32 @@ export function createSettingsPanel({
     }
   }
 
-  function formatOverviewSection(snapshot) {
-    if (snapshot.language === 'en') {
-      return [
-        'Choose a setting section below.',
-        snapshot.provider === 'codex' ? 'The defaults section edits global Codex defaults in `~/.codex/config.toml`.' : null,
-        !botProvider ? 'Switching provider restores the saved per-provider channel settings.' : null,
-      ].filter(Boolean).join('\n');
-    }
+function formatOverviewSection(snapshot) {
+  if (snapshot.language === 'en') {
     return [
-      '请选择下方的设置项。',
-      snapshot.provider === 'codex' ? '“默认”分区会直接修改 `~/.codex/config.toml` 里的全局 Codex 默认值。' : null,
-      !botProvider ? '切换 provider 会恢复这个频道里该 provider 自己保存的那组设置。' : null,
+      'Choose a section below.',
+      snapshot.provider === 'codex' ? 'Defaults edits global Codex settings in `~/.codex/config.toml`.' : null,
+      'Compact controls strategy and token limit for automatic context compaction.',
+      'Reply controls whether the bot only updates the progress card or also sends process messages.',
+      !botProvider ? 'Provider switches this channel to a different CLI lane and restores that provider’s saved channel settings.' : null,
     ].filter(Boolean).join('\n');
   }
+  return [
+    '请选择下方的设置项。',
+    snapshot.provider === 'codex' ? '默认分区会直接修改 `~/.codex/config.toml` 里的全局 Codex 默认值。' : null,
+    '压缩分区管理 compact 策略和 token 阈值。',
+    '回复分区管理只更新进度卡还是发送过程消息，以及完成时是否触发 @。',
+    !botProvider ? '切换 provider 会切到另一条 CLI 运行时，并恢复这个频道里该 provider 自己保存的设置。' : null,
+  ].filter(Boolean).join('\n');
+}
 
   function formatActiveSection(activeSection, snapshot) {
     const compactSurface = `${slashRef('compact')} key:<...> value:<...>`;
     switch (activeSection) {
       case 'defaults':
         return snapshot.language === 'en'
-          ? 'This section edits global Codex defaults in `~/.codex/config.toml`. Channel and thread overrides still win; these defaults apply only when a channel follows defaults.'
-          : '这个分区会直接修改 `~/.codex/config.toml` 里的全局 Codex 默认值。频道或 thread 的显式覆盖仍然优先，只有在“跟随默认”时才会吃到这里。';
+          ? 'This section edits global Codex defaults in `~/.codex/config.toml`. Effort and fast stay visible here. Model and profile use the modal buttons above. Enter `default` in either modal to go back to the provider default. Channel and thread overrides still win.'
+          : '这个分区会直接修改 `~/.codex/config.toml` 里的全局 Codex 默认值。effort 和 fast 直接在这里改。model 和 profile 用上面的按钮弹窗修改。在弹窗里输入 `default` 就会回到 provider 默认。频道或 thread 的显式覆盖仍然优先。';
       case 'provider':
         return snapshot.language === 'en'
           ? 'Provider switches the active runtime for this channel. Each provider keeps its own saved session/model/runtime overrides.'
@@ -631,8 +661,8 @@ export function createSettingsPanel({
           : 'reasoning effort 的可选值由 provider 决定。选择 `default` 会清掉当前频道覆盖。';
       case 'compact':
         return snapshot.language === 'en'
-          ? `This panel currently controls compact strategy only. For token limits or enabled/status details, keep using \`${compactSurface}\`.`
-          : `这个面板当前只管理 compact strategy。若要设置 token limit 或查看更多细项，继续使用 \`${compactSurface}\`。`;
+          ? `Compact has two parts here. Strategy decides how compaction runs. Token limit decides when the bot considers a turn large enough to compact. Follow default removes this channel override. For deeper native-only details, \`${compactSurface}\` is still available.`
+          : `这里的压缩设置分两层。strategy 决定怎么压缩。token 阈值决定消息多大时开始考虑 compact。跟随默认会清掉当前频道的阈值覆盖。更细的 native 专属细节仍可继续用 \`${compactSurface}\`。`;
       case 'reply':
         return snapshot.language === 'en'
           ? 'Choose whether the channel only updates the progress card or also sends process messages, and whether completion should trigger @.'
@@ -718,6 +748,9 @@ export function createSettingsPanel({
             ? `• compact: \`${snapshot.compact.strategy}\` (${formatSettingSourceLabel(snapshot.compact.source, snapshot.language)})`
             : `• compact：\`${snapshot.compact.strategy}\`（${formatSettingSourceLabel(snapshot.compact.source, snapshot.language)}）`,
           snapshot.language === 'en'
+            ? `• compact token limit: ${snapshot.compactThreshold.tokens} (${formatSettingSourceLabel(snapshot.compactThreshold.source, snapshot.language)})`
+            : `• compact 阈值：${snapshot.compactThreshold.tokens}（${formatSettingSourceLabel(snapshot.compactThreshold.source, snapshot.language)}）`,
+          snapshot.language === 'en'
             ? `• reply delivery: ${formatReplyDeliveryModeLabel(snapshot.replyDelivery.mode, snapshot.language)} (${formatSettingSourceLabel(snapshot.replyDelivery.source, snapshot.language)})`
             : `• 回复方式：${formatReplyDeliveryModeLabel(snapshot.replyDelivery.mode, snapshot.language)}（${formatSettingSourceLabel(snapshot.replyDelivery.source, snapshot.language)}）`,
           snapshot.language === 'en'
@@ -735,19 +768,20 @@ export function createSettingsPanel({
         ]),
       '',
       snapshot.language === 'en'
-        ? `**Active: ${activeSection}**`
-        : `**当前项：${activeSection}**`,
+        ? `**Active: ${formatSectionTitleLabel(activeSection, snapshot.language)}**`
+        : `**当前项：${formatSectionTitleLabel(activeSection, snapshot.language)}**`,
       formatActiveSection(activeSection, snapshot),
     ];
     return lines.filter(Boolean).join('\n');
   }
 
-  function buildSettingsPayload({ key, session, userId, flags = undefined, activeSection = '', notice = '' } = {}) {
+  function buildSettingsPayload({ key, session, userId, flags = undefined, activeSection = '', activeDefaultsGroup = 'model', notice = '' } = {}) {
     const section = resolveActiveSection(session, activeSection || resolveDefaultSection(session));
     const snapshot = buildSnapshot(key, session);
     const components = [
-      ...buildSectionButtons(session, userId, section),
+      ...buildSectionNavigation(session, userId, section),
       ...buildSectionControls(key, session, userId, section, snapshot),
+      buildCloseRow(session, userId),
     ];
     const payload = {
       content: formatSettingsContent(key, session, section, notice),
@@ -819,6 +853,27 @@ export function createSettingsPanel({
       );
   }
 
+  function buildCompactThresholdModal(session, userId) {
+    const language = normalizeUiLanguage(getSessionLanguage(session) || defaultUiLanguage);
+    const input = new TextInputBuilder()
+      .setCustomId(COMPACT_THRESHOLD_INPUT_ID)
+      .setLabel(language === 'en' ? 'Compact token limit or default' : 'Compact token 阈值或 default')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder(language === 'en' ? 'e.g. 272000 or default' : '例如 272000 或 default')
+      .setRequired(true)
+      .setMaxLength(20);
+    if (session?.compactThresholdTokens !== null && session?.compactThresholdTokens !== undefined) {
+      input.setValue(String(session.compactThresholdTokens));
+    }
+
+    return new ModalBuilder()
+      .setCustomId(buildSettingsModalId('compact_threshold', userId))
+      .setTitle(language === 'en' ? 'Set compact token limit' : '设置 compact token 阈值')
+      .addComponents(
+        new ActionRowBuilder().addComponents(input),
+      );
+  }
+
   async function handleSettingsPanelInteraction(interaction) {
     const parsed = parseSettingsComponentId(interaction.customId);
     if (!parsed) return false;
@@ -844,11 +899,14 @@ export function createSettingsPanel({
     }
 
     if (parsed.kind === 'nav') {
+      const nextSection = parsed.target === 'section'
+        ? normalizeSection(interaction.values?.[0] || '')
+        : (parsed.target === 'defaults_group' ? 'defaults' : parsed.target);
       await interaction.update(buildSettingsPayload({
         key,
         session,
         userId: interaction.user.id,
-        activeSection: parsed.target,
+        activeSection: nextSection,
       }));
       return true;
     }
@@ -882,6 +940,11 @@ export function createSettingsPanel({
         return true;
       }
 
+      if (parsed.target === 'compact_threshold' && parsed.value === 'custom') {
+        await interaction.showModal(buildCompactThresholdModal(session, interaction.user.id));
+        return true;
+      }
+
       if (parsed.target === 'model' && parsed.value === 'default') {
         commandActions.setModel?.(session, 'default');
         closeRuntimeForKey(key);
@@ -902,6 +965,7 @@ export function createSettingsPanel({
           session,
           userId: interaction.user.id,
           activeSection: 'defaults',
+          activeDefaultsGroup: 'model',
           notice: language === 'en'
             ? '✅ Global default model cleared. Codex now follows the provider default.'
             : '✅ 已清除全局默认 model。Codex 现已回退到 provider 默认模型。',
@@ -929,9 +993,23 @@ export function createSettingsPanel({
           session,
           userId: interaction.user.id,
           activeSection: 'defaults',
+          activeDefaultsGroup: 'profile',
           notice: language === 'en'
             ? '✅ Global default Codex profile cleared. Codex now follows the provider default.'
             : '✅ 已清除全局默认 Codex profile。Codex 现已回退到 provider 默认。',
+        }));
+        return true;
+      }
+
+      if (parsed.target === 'compact_threshold' && parsed.value === 'default') {
+        commandActions.applyCompactConfig?.(session, { type: 'set_threshold', tokens: null });
+        closeRuntimeForKey(key);
+        await interaction.update(buildSettingsPayload({
+          key,
+          session,
+          userId: interaction.user.id,
+          activeSection: 'compact',
+          notice: language === 'en' ? '✅ Compact token limit now follows the default.' : '✅ compact 阈值已改为跟随默认。',
         }));
         return true;
       }
@@ -1014,6 +1092,13 @@ export function createSettingsPanel({
         activeSection: parsed.target === 'default_reply'
           ? 'reply'
           : (parsed.target.startsWith('default_') ? 'defaults' : parsed.target),
+        activeDefaultsGroup: parsed.target === 'default_effort'
+          ? 'effort'
+          : (parsed.target === 'default_fast'
+            ? 'fast'
+            : (parsed.target === 'default_profile'
+              ? 'profile'
+              : 'model')),
       }));
       return true;
     }
@@ -1072,6 +1157,7 @@ export function createSettingsPanel({
         session,
         userId: interaction.user.id,
         activeSection: 'defaults',
+        activeDefaultsGroup: 'model',
         flags: 64,
         notice: language === 'en'
           ? '✅ Global default model updated in `~/.codex/config.toml`.'
@@ -1103,10 +1189,34 @@ export function createSettingsPanel({
         session,
         userId: interaction.user.id,
         activeSection: 'defaults',
+        activeDefaultsGroup: 'profile',
         flags: 64,
         notice: language === 'en'
           ? '✅ Global default Codex profile updated.'
           : '✅ 已更新全局默认 Codex profile。',
+      }));
+      return true;
+    }
+
+    if (parsed.target === 'compact_threshold') {
+      const rawValue = String(interaction.fields.getTextInputValue(COMPACT_THRESHOLD_INPUT_ID) || '').trim();
+      const parsedCompact = parseCompactConfigAction('token_limit', rawValue);
+      if (parsedCompact?.type !== 'set_threshold') {
+        await interaction.reply({
+          content: language === 'en' ? '❌ Invalid compact token limit. Use a positive integer or `default`.' : '❌ compact 阈值无效。请输入正整数或 `default`。',
+          flags: 64,
+        });
+        return true;
+      }
+      commandActions.applyCompactConfig?.(session, parsedCompact);
+      closeRuntimeForKey(key);
+      await interaction.reply(buildSettingsPayload({
+        key,
+        session,
+        userId: interaction.user.id,
+        activeSection: 'compact',
+        flags: 64,
+        notice: language === 'en' ? '✅ Compact token limit updated. This is the latest settings panel.' : '✅ compact 阈值已更新。这是最新的设置面板。',
       }));
       return true;
     }

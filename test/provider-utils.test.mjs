@@ -156,6 +156,46 @@ test('buildRunnerArgs still forwards native compact config for a fresh codex ses
   ]);
 });
 
+test('buildRunnerArgs uses codex auto-review approvals in safe mode', () => {
+  const freshArgs = buildRunnerArgs({
+    provider: 'codex',
+    sessionId: null,
+    workspaceDir: '/tmp/work',
+    prompt: 'fix it',
+    mode: 'safe',
+  });
+  const resumedArgs = buildRunnerArgs({
+    provider: 'codex',
+    sessionId: 'abc-123',
+    workspaceDir: '/tmp/work',
+    prompt: 'continue',
+    mode: 'safe',
+  });
+
+  assert.deepEqual(freshArgs.slice(0, 9), [
+    'exec',
+    '--json',
+    '--skip-git-repo-check',
+    '--sandbox',
+    'workspace-write',
+    '-c',
+    'approval_policy="on-request"',
+    '-c',
+    'approvals_reviewer="auto_review"',
+  ]);
+  assert.deepEqual(resumedArgs.slice(0, 9), [
+    'exec',
+    'resume',
+    '--json',
+    '-c',
+    'sandbox_mode="workspace-write"',
+    '-c',
+    'approval_policy="on-request"',
+    '-c',
+    'approvals_reviewer="auto_review"',
+  ]);
+});
+
 test('buildRunnerArgs builds claude print stream command with prompt delimiter', () => {
   const args = buildRunnerArgs({
     provider: 'claude',

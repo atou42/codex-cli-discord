@@ -36,6 +36,10 @@ test('runtime presentation formats runtime/session/permission labels', () => {
     presentation.formatPermissionsLabel({ provider: 'claude', mode: 'safe' }, 'zh'),
     '自动编辑（--permission-mode acceptEdits）',
   );
+  assert.equal(
+    presentation.formatPermissionsLabel({ provider: 'codex', mode: 'safe' }, 'zh'),
+    '沙盒自动审查（workspace-write，approval auto_review）',
+  );
 });
 
 test('runtime presentation localizes and renders process/progress helper lines', () => {

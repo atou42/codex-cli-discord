@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { buildCodexPermissionArgs } from './codex-permissions.js';
 import { createClaudeProviderAdapter } from './providers/claude.js';
 import { createCodexProviderAdapter } from './providers/codex.js';
 import { createGeminiProviderAdapter } from './providers/gemini.js';
@@ -51,11 +52,8 @@ export function createRunnerArgsBuilder({
   }
 
   function buildCodexArgs({ session, workspaceDir, prompt, inputImages = [] }) {
-    const modeFlag = session.mode === 'dangerous'
-      ? '--dangerously-bypass-approvals-and-sandbox'
-      : '--full-auto';
-
     const sessionId = getSessionId(session);
+    const permissionArgs = buildCodexPermissionArgs(session.mode, { resume: Boolean(sessionId) });
     const model = resolveModelSetting(session).value || defaultModel;
     const codexProfile = resolveCodexProfileSetting(session);
     const effort = resolveReasoningEffortSetting(session).value;
@@ -90,10 +88,10 @@ export function createRunnerArgsBuilder({
     }
 
     if (sessionId) {
-      return ['exec', 'resume', '--json', modeFlag, ...common, sessionId, prompt];
+      return ['exec', 'resume', '--json', ...permissionArgs, ...common, sessionId, prompt];
     }
 
-    return ['exec', '--json', '--skip-git-repo-check', modeFlag, '-C', workspaceDir, ...common, prompt];
+    return ['exec', '--json', '--skip-git-repo-check', ...permissionArgs, '-C', workspaceDir, ...common, prompt];
   }
 
   function buildClaudeArgs({ session, workspaceDir, prompt, additionalWorkspaceDirs = [] }) {

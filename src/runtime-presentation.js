@@ -15,6 +15,7 @@ import {
   renderCompletedMilestonesLines,
 } from './progress-milestones.js';
 import { humanAge as defaultHumanAge } from './runtime-utils.js';
+import { formatCodexPermissionsLabel } from './codex-permissions.js';
 
 function truncateLine(value, max) {
   const text = String(value || '');
@@ -147,13 +148,9 @@ export function createRuntimePresentation({
         : '自动编辑（--permission-mode acceptEdits）';
     }
     if (session.mode === 'dangerous') {
-      return language === 'en'
-        ? 'full access (--dangerously-bypass-approvals-and-sandbox)'
-        : '完全权限（--dangerously-bypass-approvals-and-sandbox）';
+      return formatCodexPermissionsLabel(session.mode, language);
     }
-    return language === 'en'
-      ? 'sandboxed (--full-auto)'
-      : '沙盒模式（--full-auto）';
+    return formatCodexPermissionsLabel(session.mode, language);
   }
 
   function summarizeCodexEvent(ev) {
