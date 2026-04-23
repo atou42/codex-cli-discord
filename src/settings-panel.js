@@ -712,6 +712,9 @@ function formatOverviewSection(snapshot) {
           snapshot.language === 'en'
             ? `• effective in this channel: model ${formatValueLabel(snapshot.modelValue, '(provider default)', snapshot.language)}, fast ${formatFastModeLabel(snapshot.fastMode.enabled, snapshot.language)}, effort ${formatValueLabel(snapshot.effortValue, '(provider default)', snapshot.language)}`
             : `• 当前频道生效值：model ${formatValueLabel(snapshot.modelValue, '（provider 默认）', snapshot.language)}，fast ${formatFastModeLabel(snapshot.fastMode.enabled, snapshot.language)}，effort ${formatValueLabel(snapshot.effortValue, '（provider 默认）', snapshot.language)}`,
+          snapshot.language === 'en'
+            ? `• compact context limit: ${snapshot.compactThreshold.tokens} (${formatSettingSourceLabel(snapshot.compactThreshold.source, snapshot.language)})`
+            : `• compact context 长度：${snapshot.compactThreshold.tokens}（${formatSettingSourceLabel(snapshot.compactThreshold.source, snapshot.language)}）`,
         ]
         : [
           snapshot.language === 'en'

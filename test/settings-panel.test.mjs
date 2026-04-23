@@ -285,6 +285,7 @@ test('createSettingsPanel defaults to the global codex defaults section', () => 
   assert.match(payload.content, /作用域：`~\/.codex\/config\.toml`/);
   assert.match(payload.content, /当前项：Codex 默认/);
   assert.match(payload.content, /effort 和 fast 直接在这里改/);
+  assert.match(payload.content, /compact context 长度：272000（环境默认）/);
   assert.equal(payload.components.length, 5);
   assert.equal(payload.components[1].components[0].data.customId, 'stg:act:default_profile:custom:12345');
   assert.equal(payload.components[1].components[1].data.customId, 'stg:act:default_model:custom:12345');
