@@ -199,6 +199,7 @@ export function createAppContext({
       resolveFastModeSetting: sessionSettings.resolveFastModeSetting,
       resolveRuntimeModeSetting: sessionSettings.resolveRuntimeModeSetting,
       resolveCompactStrategySetting: sessionSettings.resolveCompactStrategySetting,
+      resolveCompactThresholdSetting: sessionSettings.resolveCompactThresholdSetting,
       resolveReplyDeliverySetting: sessionSettings.resolveReplyDeliverySetting,
       getDefaultCodexProfile: commandActionsOptions.resolveDefaultCodexProfile,
       getReplyDeliveryDefault: commandActionsOptions.resolveReplyDeliveryDefault,
