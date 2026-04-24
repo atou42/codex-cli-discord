@@ -1,56 +1,54 @@
 # Agents in Discord
 
-一个独立运行、让你可以直接在 Discord 里指挥 **Codex CLI**、**Claude Code** 和 **Gemini CLI** 的 Discord Bot。
+在 Discord 线程里运行 Codex CLI、Claude Code 和 Gemini CLI 的 bot。
 
-> 这是一个独立运行的 Discord Bot / bridge，**不是** OpenClaw 插件，也**不依赖** OpenClaw 才能运行。
+它是一个独立 bridge，不是 OpenClaw 插件，也不需要 OpenClaw。
 
 [English](./README.en.md)
 
-**维护者：** [ATou](https://github.com/atou42) 与 [Lark](https://github.com/Larkspur-Wang) 共同维护。
+维护者：[ATou](https://github.com/atou42) 与 [Lark](https://github.com/Larkspur-Wang)
 
-**设计原则：**1 个 Discord **线程/频道 = 1 个 CLI 会话**（按当前 provider 自动续聊）。
+## 核心模型
 
-## 功能特性
+一个 Discord 频道或线程，对应一条 provider 会话。
 
-- Slash 命令（不需要 `!` 前缀）
-- 按线程持久化会话（重启后可恢复）
-- 灵活 workspace 模型：thread 覆盖、provider 默认目录，以及 legacy 每线程回退目录
-- Provider-aware runtime surface：
-  - Codex：rollout sessions、全局 `~/.codex/sessions` 历史、支持 raw config passthrough、支持 `native_limit`
-  - Claude：project sessions、可跨 workspace 继续的 resume、native compact 走 provider 默认行为
-  - Gemini：chat sessions、按 workspace 绑定 resume、native compact 走 provider 默认行为
-- 运行时自愈：Discord/运行时出现瞬时故障后自动退避重登
-- workspace 级串行保护：同一个 workspace 不会在不同频道 / 不同 bot 中并发执行
-- 两种模式：
-  - `safe` -> `codex exec --full-auto`（沙箱模式）
-  - `dangerous` -> `--dangerously-bypass-approvals-and-sandbox`（完全访问）
-- 可选代理（Clash / 企业代理）：REST 走 `HTTP_PROXY`，Gateway WS 走 `SOCKS_PROXY`
-- 轻量交互体验：
-  - 开始时反应 `⚡`，成功 `✅`，失败 `❌`，取消 `🛑`
-  - 用 `/name` 给会话命名
-  - 按频道排队（新消息进入队列，不会被直接拒绝）
-  - `/cancel` / `/abort` / `!cancel` / `!c` / `!abort` 可中断当前运行并清空队列
-  - 长任务实时进度（阶段/耗时/最新步骤），并支持 `/progress` / `!progress`
-  - `/doctor` / `!doctor` 可做运行与安全配置体检
-  - `/onboarding` 面向普通用户首跑：四步完成语言、provider、workspace、ready，workspace 步可直接打开路径选择器；`!onboarding` 提供文本版兜底
-  - slash 回复默认不再附带通用快捷按钮；需要时直接用 `/status`、`/queue`、`/progress`、`/cancel`
-  - 支持按线程配置 onboarding 开关（on/off/status）与消息提示语言（zh/en，默认 zh）
-  - 支持按线程覆盖 security profile（`auto|solo|team|public`）
-  - 支持按线程覆盖 runner timeout（`毫秒|off|status`）
+你可以在同一个 Discord 服务器里使用共享 bot，也可以把 Codex、Claude、Gemini 拆成三个独立 bot。每个 provider 有自己的 session、workspace、模型和运行配置，不会混在一起。
 
-## 前置条件
+长任务不会一直刷屏。bot 会更新进度卡，也可以按频道设置成持续发送过程消息。最终回复是否 @ 发起人，也可以在设置里选。
 
-- Node.js 18+
-- 安装你计划使用的 CLI
-  - Codex：当前 shell 可直接执行 `codex`，或在 `.env` 设置 `CODEX_BIN=/absolute/path/to/codex`
-  - Claude：当前 shell 可直接执行 `claude`，或在 `.env` 设置 `CLAUDE_BIN=/absolute/path/to/claude`
-  - Gemini：当前 shell 可直接执行 `gemini`，或在 `.env` 设置 `GEMINI_BIN=/absolute/path/to/gemini`
-- 如果 CLI 自己需要登录，请先在 CLI 内完成；这个项目不通过 `.env` 管 provider auth
-- 一个或两个 Discord Application/Bot Token
-  - 共享模式：一个 bot token 即可
-  - 独立模式：Codex / Claude / Gemini 可分别使用不同 bot token
+Codex 的安全模式现在使用 workspace-write 沙盒，并把需要审批的动作交给 Codex 的 auto review reviewer。危险模式仍然是完全绕过 sandbox 和 approval，只适合受控的个人环境。
 
-## 快速开始
+## 你能做什么
+
+- 在 Discord 里发任务，让 CLI agent 在指定 workspace 里工作
+- 按频道保存会话，下次继续同一条上下文
+- 用设置面板切换 provider、model、effort、fast、compact、reply、workspace
+- 查看实时进度、队列、运行状态、quota、账号和当前配置来源
+- 对同一个 workspace 做串行保护，避免多个频道同时改同一份代码
+- 通过 `/cancel` 或文本命令中断当前任务并清空队列
+- 在长任务里选择只看进度卡，或让过程消息持续流出
+
+## 准备
+
+需要 Node.js 18+，一个 Discord Bot Token，以及你要使用的 CLI。
+
+本项目不管理 Codex、Claude、Gemini 自己的登录状态。请先在本机 CLI 里完成登录，并确认命令能直接运行。
+
+```bash
+codex --version
+claude --version
+gemini --version
+```
+
+如果 CLI 不在 bot 进程的 PATH 里，可以在 `.env` 里写绝对路径。
+
+```env
+CODEX_BIN=/opt/homebrew/bin/codex
+CLAUDE_BIN=/opt/homebrew/bin/claude
+GEMINI_BIN=/opt/homebrew/bin/gemini
+```
+
+## 安装
 
 ```bash
 git clone https://github.com/atou42/agents-in-discord.git
@@ -61,301 +59,180 @@ npm run setup-hooks
 npm start
 ```
 
-Git hooks 说明：
+`npm run setup-hooks` 只需要在 clone 后执行一次。它会启用本仓库的提交前检查。
 
-- clone 后（或重新 clone 后）执行一次 `npm run setup-hooks`
-- pre-commit 原子性检查基于 Node，可在 macOS/Linux/Windows 上工作（不依赖 bash）
+## Discord 里怎么用
 
-然后在你的 Discord 服务器邀请 Bot。普通用户首跑建议先执行 `/cx_onboarding`，依次选语言、provider、workspace，再发第一条任务。
+默认 shared bot 的 slash 前缀是 `cx_`。独立 Claude bot 默认是 `cc_`，独立 Gemini bot 默认是 `gm_`。
 
-下面示例使用的是 Codex / shared 模式默认前缀 `cx_`；独立 Claude bot 默认前缀是 `cc_`，独立 Gemini bot 默认前缀是 `gm_`，并且都可通过 `SLASH_PREFIX`、`CODEX__SLASH_PREFIX`、`CLAUDE__SLASH_PREFIX`、`GEMINI__SLASH_PREFIX` 覆盖：
+最常用的入口是这些。
 
-- `/cx_status` - 查看当前线程配置
-- `/cx_settings` - 打开当前频道的交互式设置面板；统一调整 provider、model、fast、effort、compact、mode、language、workspace
-- `/cx_setdir <path|default|status>` - 设置或清除当前线程的 workspace
-- `/cx_setdefaultdir <path|clear|status>` - 设置当前 provider 的默认 workspace
-- `/cx_model <name|default>` - 设置模型覆盖
-- `/cx_fast <on|off|status|default>` - 切换当前频道的 Codex Fast mode；仅 Codex 暴露，`default` 表示回退到 `~/.codex/config.toml` 里的 `[features].fast_mode`，未配置时默认开启
-- `/cx_effort <...>` - 设置 reasoning effort；Codex 支持 `xhigh|high|medium|low|default`，Claude 支持 `high|medium|low|default`，Gemini 不暴露该命令
-- `/cx_compact key:<...> value:<...>` - 配置当前频道 compact；三家 provider 都支持 `strategy|token_limit|enabled|reset|status`，`native_limit` 仅在 provider 暴露原生 limit 覆盖时可用（当前主要是 Codex）
-- `/cx_mode <safe|dangerous>` - 设置执行模式
-- `/cx_name <label>` - 命名会话（用于显示）
-- `/cx_new` - 切到新会话，但保留当前频道配置
-- `/cx_reset` - 清空当前线程会话与额外配置
-- `/cx_resume <session_id>` - 绑定已有 provider 会话 ID
-- `/cx_sessions` - 列出 provider 原生运行时里的最近会话
-- `/cx_queue` - 查看当前频道运行中/排队任务数量
-- `/cx_doctor` - 查看 Bot 运行/安全体检信息
-- `/cx_onboarding` - 普通用户首跑引导（language/provider/workspace/ready，ephemeral）
-- `/cx_onboarding_config <on|off|status>` - 配置当前频道 onboarding 是否可用
-- `/cx_language <中文|English>` - 设置当前频道消息提示语言
-- `/cx_profile <auto|solo|team|public|status>` - 设置或查看当前频道 security profile 覆盖
-- `/cx_timeout <毫秒|off|status>` - 设置当前频道 runner timeout 覆盖
-- `/cx_progress` - 查看当前运行任务的最新进度快照
-- `/cx_abort` - 中断当前运行并清空队列（兼容旧 alias）
-- `/cx_cancel` - 中断当前运行并清空队列；文本命令可用 `!cancel` / `!c`，并兼容 `!abort` / `!stop`
+```text
+/cx_onboarding     首次引导，设置语言、provider、workspace
+/cx_settings       打开交互式设置面板
+/cx_status         查看当前配置、运行状态、quota、账号信息
+/cx_progress       查看当前任务进度
+/cx_queue          查看当前频道队列
+/cx_cancel         中断当前任务并清空队列
+/cx_new            开一个新会话，但保留频道配置
+/cx_resume         绑定已有 provider 会话
+/cx_sessions       查看最近会话
+/cx_setdir         设置当前频道 workspace
+/cx_compact        配置 compact 策略和阈值
+```
 
-常用文本命令别名：
+文本命令主要作为兜底。常用的是 `!cancel`、`!c`、`!progress`、`!status`、`!resume`、`!sessions`。
 
-- `!cancel` / `!c` / `!abort` / `!stop` - 中断当前运行并清空队列
-- `!fast <on|off|status|default>` - 覆盖当前频道的 Codex Fast mode；`default` 继承 `~/.codex/config.toml`
+## 设置面板
 
-provider 原生命名 alias：
+推荐优先用 `/cx_settings`。它比记命令更稳，也会显示当前值来自哪里。
 
-- Codex：`/cx_rollout_sessions`、`/cx_rollout_resume`
-- Claude：`/cc_project_sessions`、`/cc_project_resume`
-- Gemini：`/gm_chat_sessions`、`/gm_chat_resume`
-- 通用的 `/cx_sessions`、`/cx_resume`、`!sessions`、`!resume` 仍然保留；独立 bot 会自动把帮助文案收窄到当前 provider 的原生命名
+设置有继承关系。线程里的显式设置优先，其次是父频道默认，再其次是 provider 或环境默认。`/cx_status` 会显示当前实际生效值和来源。
 
-如果你希望 **Codex / Claude / Gemini 绑定不同 Discord bot**，现在改成只用一个 `.env`，但在文件里分段分组：
+Codex 默认设置会直接修改 `~/.codex/config.toml`。频道或线程里的覆盖仍然优先，只有在跟随默认时才会吃到这里。
+
+## Workspace
+
+workspace 是 CLI 真正执行任务的目录。
+
+推荐给每个 provider 设置一个默认 workspace。线程可以继续继承默认，也可以单独覆盖。子线程默认继承父频道 workspace，也可以配置成独立 workspace。
+
+同一个 workspace 同一时间只允许一个任务执行。其他任务会排队或提示 workspace 正忙，避免并发改同一份代码。
+
+## 运行模式
+
+本地开发可以直接跑 shared bot。
 
 ```bash
-# 首次准备
-cp .env.example .env
+npm start
+```
 
-# 启动各自独立的 bot
+如果想把三家 provider 拆成独立 bot，可以在同一个 `.env` 里写分组配置，然后分别启动。
+
+```bash
 npm run start:codex
 npm run start:claude
 npm run start:gemini
 ```
 
-共享配置继续用普通 key，只放 Discord / 运行时配置；Codex / Claude / Gemini 专属配置放在同一个 `.env` 里的 `CODEX__*` / `CLAUDE__*` / `GEMINI__*` 段落里。实际通常只需要各自的 `DISCORD_TOKEN`，以及按需填写 `DEFAULT_MODEL`、`DEFAULT_MODE`、CLI 路径。锁定实例后会自动使用独立状态文件（`data/sessions.codex.json`、`data/sessions.claude.json`、`data/sessions.gemini.json`）和独立进程锁，因此不会串频道/串会话上下文。
+分组配置使用 `CODEX__*`、`CLAUDE__*`、`GEMINI__*`。通常只需要各自的 `DISCORD_TOKEN`，再按需填默认模型、默认 workspace 和 CLI 路径。
 
-## 配置（.env）
+## 关键配置
 
-见 `.env.example`。
+完整配置看 `.env.example`。README 只列最常改的项。
 
-关键项：
+```env
+DISCORD_TOKEN=...
+ALLOWED_CHANNEL_IDS=...
+ALLOWED_USER_IDS=...
+WORKSPACE_ROOT=/Users/you/workspaces
+DEFAULT_WORKSPACE_DIR=/Users/you/project
+DEFAULT_MODE=safe
+DEFAULT_UI_LANGUAGE=zh
+```
 
-- `ALLOWED_CHANNEL_IDS` / `ALLOWED_USER_IDS`：限制可用范围（推荐）；锁定 provider 的 bot 也支持 `CODEX__ALLOWED_*` / `CLAUDE__ALLOWED_*` / `GEMINI__ALLOWED_*`
-- 共享 `.env` key：只放 Discord / 运行时配置（`ALLOWED_*`、`WORKSPACE_ROOT`、`DEFAULT_WORKSPACE_DIR`、代理等）
-- `CODEX__*`：同一个 `.env` 里的 Codex bot 分组（通常只需要 `CODEX__DISCORD_TOKEN`，以及按需填写 `CODEX__DEFAULT_MODEL`、`CODEX__DEFAULT_MODE`、`CODEX__DEFAULT_WORKSPACE_DIR`、`CODEX__MAX_INPUT_TOKENS_BEFORE_COMPACT`、`CODEX__CODEX_BIN`）
-- `CLAUDE__*`：同一个 `.env` 里的 Claude bot 分组（通常只需要 `CLAUDE__DISCORD_TOKEN`，以及按需填写 `CLAUDE__DEFAULT_MODEL`、`CLAUDE__DEFAULT_MODE`、`CLAUDE__DEFAULT_WORKSPACE_DIR`、`CLAUDE__CLAUDE_BIN`）
-- `GEMINI__*`：同一个 `.env` 里的 Gemini bot 分组（通常只需要 `GEMINI__DISCORD_TOKEN`，以及按需填写 `GEMINI__DEFAULT_MODEL`、`GEMINI__DEFAULT_MODE`、`GEMINI__DEFAULT_WORKSPACE_DIR`、`GEMINI__GEMINI_BIN`）
-- `BOT_PROVIDER`：留空表示共享模式；设为 `codex` / `claude` / `gemini` 可把当前 bot 实例锁到单一 provider；`npm run start:codex` / `npm run start:claude` / `npm run start:gemini` 会自动设置
-- `ENV_FILE`：仍可选配额外 overlay 文件，但常规使用现在就是单个分组 `.env`
-- `DISCORD_TOKEN_CODEX` / `DISCORD_TOKEN_CLAUDE` / `DISCORD_TOKEN_GEMINI`：旧的单文件回退方案，保留兼容
-- provider 登录/鉴权不属于这个项目的配置面；除非你明确需要，否则不要把 CLI 自己的 secret 塞进这个 `.env`
-- `SECURITY_PROFILE`：`auto | solo | team | public`
-  - `auto`：DM -> `solo`；服务器内若 `@everyone` 可见频道则 `public`；否则 `team`
-- `MENTION_ONLY`：普通消息是否必须 @Bot（留空则使用 profile 默认）
-- `MENTION_ONLY_ENABLED_GUILD_IDS`：逗号分隔的 guild ID 列表；这些服务器里普通消息必须 @Bot，优先级高于 `MENTION_ONLY`
-- `MENTION_ONLY_DISABLED_GUILD_IDS`：逗号分隔的 guild ID 列表；这些服务器里普通消息不必 @Bot，优先级高于 `MENTION_ONLY`
-- `MAX_QUEUE_PER_CHANNEL`：每频道最大排队数（`0` 表示无限制；留空则使用 profile 默认）
-- `ENABLE_CONFIG_CMD`：是否启用 `!config`（默认 `false`）
-- `CONFIG_ALLOWLIST`：`!config key=value` 允许的 key（逗号分隔，或 `*` 表示全部允许）
-- `SLASH_PREFIX`：shared / 全局 slash 前缀；shared 模式默认 `cx`（例如 `/cx_status`）
-- `CODEX__SLASH_PREFIX` / `CLAUDE__SLASH_PREFIX` / `GEMINI__SLASH_PREFIX`：独立 bot 的 slash 前缀覆盖；默认分别是 Codex=`cx`、Claude=`cc`、Gemini=`gm`
-- `DEFAULT_UI_LANGUAGE`：新频道默认提示语言（`zh` 或 `en`，默认 `zh`）
-- `ONBOARDING_ENABLED_DEFAULT`：新频道 onboarding 默认开关（`true` 或 `false`，默认 `true`）
-- `DEFAULT_MODE`：`safe` 或 `dangerous`；示例 `.env` 里 **默认用 `dangerous`**，方便本地全功能开发。生产 / 多人环境建议：
-  - 把 `.env` 里的 `CODEX__DEFAULT_MODE` / `CLAUDE__DEFAULT_MODE` / `GEMINI__DEFAULT_MODE` 改回 `safe`，只在需要的频道用 `/cx_mode dangerous` 开启
-  - 或者在只对自己可见的服务器里跑 `dangerous`，避免误操作影响团队
-- `DEFAULT_WORKSPACE_DIR`：所有 provider 共用的默认 workspace（可选）
-- `CODEX__DEFAULT_WORKSPACE_DIR` / `CLAUDE__DEFAULT_WORKSPACE_DIR` / `GEMINI__DEFAULT_WORKSPACE_DIR`：provider 级默认 workspace，会覆盖共享默认值
-- `CHILD_THREAD_WORKSPACE_MODE`：子线程的 workspace 继承策略；`inherit` 默认继承父频道的显式 workspace，`separate` 则让子线程改用自己的 provider 默认目录或 `WORKSPACE_ROOT/<threadId>` 回退目录
-- `WORKSPACE_ROOT`：仅在未配置 thread 覆盖与 provider 默认目录时，作为 legacy 回退目录根路径
-- `CODEX_BIN`：codex 命令/路径（默认 `codex`）
-- `CLAUDE_BIN`：claude 命令/路径（默认 `claude`）
-- `GEMINI_BIN`：gemini 命令/路径（默认 `gemini`）
-- Codex 的 provider 默认 `model`、`effort`、`fast mode` 会从 `~/.codex/config.toml` 读取；如果没有显式写 `[features].fast_mode = false`，fast mode 默认开启；频道级 `!model`、`!effort`、`!fast` 只覆盖当前线程
-- `CODEX_TIMEOUT_MS`：默认 runner 硬超时（毫秒），当前三家 provider 共用这一个默认值；`0` 表示禁用超时，频道内可再用 `/cx_timeout` / `!timeout` 覆盖
-- `PROGRESS_UPDATES_ENABLED`：是否启用频道实时进度更新（默认 `true`）
-- `PROGRESS_UPDATE_INTERVAL_MS`：进度消息心跳刷新间隔
-- `PROGRESS_EVENT_FLUSH_MS`：事件触发进度编辑的最小间隔
-- `PROGRESS_EVENT_DEDUPE_WINDOW_MS`：语义相同进度事件（stdout + rollout bridge）的去重窗口（毫秒，默认 `2500`）
-- `PROGRESS_TEXT_PREVIEW_CHARS`："最新步骤" 预览截断长度
-- `PROGRESS_INCLUDE_STDERR`：进度预览中是否包含原始 stderr（噪声较大，默认 `false`）
-- `PROGRESS_PLAN_MAX_LINES`：进度中展示的 plan 条目上限（默认 `4`）
-- `PROGRESS_DONE_STEPS_MAX`：进度中展示的“已完成关键步骤”上限（默认 `4`）
-- `PROGRESS_MESSAGE_MAX_CHARS`：每次进度消息渲染的总字符上限（默认 `1800`）
-- `SELF_HEAL_ENABLED`：是否启用运行时自愈（默认 `true`）
-- `SELF_HEAL_RESTART_DELAY_MS`：自愈重启前延迟（默认 `5000`）
-- `SELF_HEAL_MAX_LOGIN_BACKOFF_MS`：Discord 登录重试最大退避（默认 `60000`）
-- `MAX_INPUT_TOKENS_BEFORE_COMPACT`：触发 compact 的阈值
-- `COMPACT_STRATEGY`：`hard | native | off`（默认 `native`）
-  - `hard`：Bot 先总结，再切换到新会话
-  - `native`：走 provider 原生 compact，继续同一会话
-  - `off`：关闭 compact 行为
-- 也可以通过 `/cx_compact` 或 `!compact` 在频道级覆盖 compact strategy
-- `COMPACT_ON_THRESHOLD`：是否启用阈值触发的 compact 逻辑
-- 频道级 compact 配置支持：`strategy`、`token_limit`、`native_limit`、`enabled`、`reset`、`status`
-  - 三家 provider 都支持 `native`
-  - `native_limit` 仅在 CLI 暴露原生 token limit 覆盖面时可用（当前主要是 Codex）
+常见 provider 分组配置如下。
 
-## Codex CLI 自动升级（可选调度适配器）
+```env
+CODEX__DISCORD_TOKEN=...
+CODEX__DEFAULT_WORKSPACE_DIR=/Users/you/codex-work
+CODEX__SLASH_PREFIX=cx
 
-这个仓库内置了跨平台 `codex` 升级器，可实现：
+CLAUDE__DISCORD_TOKEN=...
+CLAUDE__DEFAULT_WORKSPACE_DIR=/Users/you/claude-work
+CLAUDE__SLASH_PREFIX=cc
 
-- 定时检查更新
-- 自动升级 `codex`
-- 升级成功后重启你的 bot 服务
+GEMINI__DISCORD_TOKEN=...
+GEMINI__DEFAULT_WORKSPACE_DIR=/Users/you/gemini-work
+GEMINI__SLASH_PREFIX=gm
+```
 
-安装（按系统自动选择调度器：macOS=`launchd`、Windows=`Task Scheduler`、其他=`none`）：
+访问控制建议至少设置 `ALLOWED_CHANNEL_IDS` 或 `ALLOWED_USER_IDS`。多人服务器里不要默认使用 dangerous mode。
+
+compact 相关配置可以在 `.env` 里设默认，也可以在 Discord 里按频道覆盖。
+
+```env
+COMPACT_STRATEGY=native
+COMPACT_ON_THRESHOLD=true
+MAX_INPUT_TOKENS_BEFORE_COMPACT=272000
+```
+
+## 代理
+
+如果 Discord 或 CLI 需要走代理，可以设置：
+
+```env
+HTTP_PROXY=http://127.0.0.1:7890
+SOCKS_PROXY=socks5h://127.0.0.1:7891
+```
+
+`npm install` 会自动运行 `npm run patch-ws`，让 Discord Gateway WebSocket 可以使用自定义 agent。
+
+## 本地服务
+
+macOS 上推荐用仓库自带脚本重启 bot 服务。
+
+```bash
+scripts/restart-discord-bot-service.sh codex
+scripts/restart-discord-bot-service.sh claude
+scripts/restart-discord-bot-service.sh gemini
+scripts/restart-discord-bot-service.sh all
+```
+
+这个脚本会使用受保护的 launchd label，避免误用危险的 `launchctl` 操作。
+
+## Codex CLI 自动升级
+
+仓库内置一个可选的 Codex CLI 升级器。它可以定时检查 Codex 更新，升级成功后重启 bot 服务。
 
 ```bash
 npm run install:auto-upgrade
-```
-
-自定义调度（示例：每天 `03:40`）：
-
-```bash
-SCHEDULE_HOUR=3 SCHEDULE_MINUTE=40 npm run install:auto-upgrade
-```
-
-禁用调度器但保留手动升级器：
-
-```bash
-AUTO_UPGRADE_SCHEDULER=none npm run install:auto-upgrade
-```
-
-手动运行（用于 smoke test）：
-
-```bash
 npm run run:auto-upgrade
 ```
 
-手动运行（dry-run，不做包/服务变更）：
+只想 dry-run：
 
 ```bash
 CODEX_UPGRADE_DRY_RUN=1 npm run run:auto-upgrade
 ```
 
-macOS 说明：
+## 发布
 
-- 升级器会把 `brew update` 当作尽力步骤；第三方 tap 超时后，仍会继续检查/升级目标 cask
-- 如需完全跳过显式 `brew update`，可设置 `CODEX_UPGRADE_SKIP_BREW_UPDATE=1`
-
-### macOS（`launchd`）
-
-默认 ID：
-
-- 升级服务 label：`com.atou.agents-in-discord.auto-upgrade`（`LABEL`）
-- Bot 服务 label：`com.atou.agents-in-discord`（`BOT_LABEL`）
-
-手动管理 bot 服务时注意：
-
-- 运行时会把受保护 bot label 的危险 `launchctl` 操作拦住或改写到安全重启 helper
-- 推荐直接运行 `scripts/restart-discord-bot-service.sh <codex|claude|gemini|all>`
-
-查看服务与日志：
+常规改动先跑测试。
 
 ```bash
-launchctl print gui/$(id -u)/com.atou.agents-in-discord.auto-upgrade
-tail -n 100 logs/agents-in-discord.auto-upgrade.log
-tail -n 100 logs/agents-in-discord.auto-upgrade.err.log
+npm run test:progress
 ```
 
-移除服务：
+切版本使用项目脚本。
 
 ```bash
-launchctl bootout gui/$(id -u)/com.atou.agents-in-discord.auto-upgrade
-rm -f ~/Library/LaunchAgents/com.atou.agents-in-discord.auto-upgrade.plist
-```
-
-### Windows（`Task Scheduler`）
-
-PowerShell 安装（等价于 `npm run install:auto-upgrade`）：
-
-```powershell
-$env:SCHEDULE_HOUR='5'
-$env:SCHEDULE_MINUTE='15'
-$env:TASK_NAME='agents-in-discord-auto-upgrade'
-$env:BOT_TASK_NAME='agents-in-discord'
-node scripts/install-agents-in-discord-auto-upgrade.mjs
-```
-
-默认值：
-
-- 升级任务名：`agents-in-discord-auto-upgrade`（`TASK_NAME` 或 `LABEL`）
-- Bot 重启任务：`agents-in-discord`（`BOT_TASK_NAME` 或 `BOT_LABEL`）
-
-查看/删除任务：
-
-```powershell
-schtasks /Query /TN "agents-in-discord-auto-upgrade" /V /FO LIST
-schtasks /Delete /TN "agents-in-discord-auto-upgrade" /F
+npm run release:patch
+npm run release:minor
+npm run release:major
 ```
 
 ## 故障排查
 
-### `spawn codex ENOENT`
+如果 `/cx_status` 显示 CLI 不存在，先在同一个机器上确认路径。
 
-这表示 Bot 进程在当前运行环境中找不到 Codex CLI 可执行文件。
-
-1. 检查该机器上的安装路径：
 ```bash
 which codex
-```
-2. 把绝对路径写入 `.env`：
-```env
-CODEX_BIN=/opt/homebrew/bin/codex
-```
-Windows 示例（PowerShell 路径）：
-```env
-CODEX_BIN=C:\\Users\\<you>\\AppData\\Local\\Programs\\Codex\\codex.exe
-```
-3. 重启 Bot 进程。
-
-你也可以执行 `/cx_status`（或当前生效前缀 + `_status`，例如默认 Claude bot 用 `/cc_status`、Gemini bot 用 `/gm_status`）查看 Bot 输出中的当前 provider CLI 健康状态。
-
-## 代理 / Clash 配置（可选）
-
-如果你在代理环境下：
-
-- Discord REST API：设置 `HTTP_PROXY=http://127.0.0.1:7890`
-- Discord Gateway WebSocket：设置 `SOCKS_PROXY=socks5h://127.0.0.1:7891`
-
-本仓库包含一个给 `@discordjs/ws` 的**尽力而为补丁脚本**（`npm install` 时会自动运行），让 Gateway 能使用自定义 agent：
-
-```bash
-npm run patch-ws
+which claude
+which gemini
 ```
 
-如果你的 HTTP 代理做了 TLS MITM，且你**必须**绕过校验：
+然后把绝对路径写进 `.env`，重启 bot。
 
-```env
-INSECURE_TLS=1
-```
+如果 settings 里看到某个值和预期不同，先看 `/cx_status`。status 会显示当前生效值，也会显示它来自当前线程、父频道、全局配置还是环境默认。
 
-（强烈不推荐。优先使用干净的 SOCKS 隧道。）
+如果任务一直不开始，先看 `/cx_queue` 和 `/cx_progress`。同一个 workspace 正在被其他频道使用时，任务会等待锁释放。
 
 ## 本地主动发消息
 
-如果你希望从本机 shell / 其他自动化流程里，直接用 bot token 往指定频道发一条消息，可以用：
+可以用 bot token 从本机向指定频道发消息。
 
 ```bash
 npm run send:channel -- --channel 1487823042121040036 --content "部署完成"
-```
-
-也支持多行文本和 provider 级 token：
-
-```bash
 cat notice.md | npm run send:channel -- --channel 1487823042121040036 --stdin
-npm run send:channel -- --channel 1487823042121040036 --content "hello" --provider codex
 ```
-
-说明：
-
-- 默认复用当前 `.env` 里的 Discord token、代理和 `BOT_PROVIDER`
-- `--provider shared|codex|claude|gemini` 可显式选择用哪组 token
-- 内容来源三选一：`--content`、`--content-file`、`--stdin`
-
-## 独立运行说明
-
-这个仓库本身就是一个独立运行的 Discord Bot，用来在 Discord 里指挥 Codex CLI、Claude Code 和 Gemini CLI。
-
-- 不需要安装 OpenClaw
-- 不需要安装任何插件
-- 保持为**独立的 Discord 应用**
-- 你仍然可以按自己习惯使用任意进程管理方式（`pm2`、`launchd`、Docker、`systemd` 等）
-
-## 安全
-
-- `dangerous` 表示**无沙箱**。Codex 将以你的用户权限执行。
-- 不要提交 `.env` / 会话文件。`.gitignore` 已做好相关忽略。
-- 如果 Bot token 泄漏，请在 Discord Developer Portal **立即轮换**。
-
-## 许可证
-
-MIT
