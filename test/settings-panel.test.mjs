@@ -134,7 +134,7 @@ const TextInputStyle = {
   Short: 'short',
 };
 
-function createPanel({ session, botProvider = null, openWorkspaceBrowser, commandActions = {} } = {}) {
+function createPanel({ session, botProvider = null, openWorkspaceBrowser, commandActions = {}, modelCatalog } = {}) {
   return createSettingsPanel({
     botProvider,
     defaultUiLanguage: 'zh',
@@ -169,6 +169,23 @@ function createPanel({ session, botProvider = null, openWorkspaceBrowser, comman
       gemini: 'Gemini CLI',
     }[provider] || provider),
     getSupportedReasoningEffortLevels: (provider) => provider === 'gemini' ? [] : (provider === 'claude' ? ['high', 'medium', 'low'] : ['xhigh', 'high', 'medium', 'low']),
+    getModelCatalog: () => modelCatalog || {
+      models: [
+        {
+          slug: 'gpt-5.4',
+          displayName: 'gpt-5.4',
+          defaultReasoningLevel: 'medium',
+          supportedReasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+        },
+        {
+          slug: 'o3',
+          displayName: 'o3',
+          defaultReasoningLevel: 'high',
+          supportedReasoningLevels: ['low', 'medium', 'high'],
+        },
+      ],
+      error: null,
+    },
     getProviderCompactCapabilities: () => ({ strategies: ['hard', 'native', 'off'] }),
     normalizeUiLanguage: (value) => String(value || '').trim().toLowerCase() === 'en' ? 'en' : 'zh',
     resolveModelSetting: (currentSession) => ({
@@ -519,6 +536,183 @@ test('createSettingsPanel shows parent channel as the inherited model source for
   });
 
   assert.match(payload.content, /model：`gpt-5.4`（父频道默认）/);
+});
+
+test('createSettingsPanel model section offers CLI catalog choices and effort controls', () => {
+  const session = {
+    provider: 'codex',
+    language: 'zh',
+    mode: 'safe',
+    model: 'o3',
+    effort: 'high',
+  };
+  const panel = createPanel({ session });
+
+  const payload = panel.openSettingsPanel({
+    key: 'thread-1',
+    session,
+    userId: '12345',
+    activeSection: 'model',
+  });
+
+  assert.match(payload.content, /当前项：模型/);
+  assert.match(payload.content, /推理力度也放在这里一起调/);
+  const modelSelect = payload.components[1].components[0];
+  assert.equal(modelSelect.data.customId, 'stg:set:model:preset:12345');
+  assert.deepEqual(modelSelect.data.options.map((option) => option.value), ['default', 'gpt-5.4', 'o3']);
+  assert.equal(modelSelect.data.options.find((option) => option.value === 'o3').default, true);
+  const labels = payload.components.flatMap((row) => row.components.map((component) => component.data.label));
+  assert.ok(labels.includes('手写模型名'));
+  assert.ok(labels.includes('xhigh'));
+  assert.ok(labels.includes('default'));
+});
+
+test('createSettingsPanel exposes a compact model-only panel', () => {
+  const session = {
+    provider: 'codex',
+    language: 'zh',
+    mode: 'safe',
+    model: 'o3',
+    effort: 'high',
+  };
+  const panel = createPanel({ session });
+
+  const payload = panel.openModelSettingsPanel({
+    key: 'thread-1',
+    session,
+    userId: '12345',
+    flags: 64,
+  });
+
+  assert.equal(payload.flags, 64);
+  assert.match(payload.content, /^\*\*模型\*\*/);
+  assert.doesNotMatch(payload.content, /provider：/);
+  assert.doesNotMatch(payload.content, /当前项：/);
+  assert.equal(payload.components[0].components[0].data.customId, 'stg:set:quick_model:preset:12345');
+  const labels = payload.components.flatMap((row) => row.components.map((component) => component.data.label));
+  assert.ok(labels.includes('手写模型名'));
+  assert.ok(labels.includes('xhigh'));
+  assert.ok(labels.includes('关闭'));
+});
+
+test('createSettingsPanel applies model catalog selection and stays in model section', async () => {
+  const session = {
+    provider: 'codex',
+    language: 'en',
+    mode: 'safe',
+    model: null,
+  };
+  const updates = [];
+  const panel = createPanel({
+    session,
+    commandActions: {
+      setModel(currentSession, value) {
+        currentSession.model = String(value || '').trim().toLowerCase() === 'default' ? null : value;
+        return { model: currentSession.model };
+      },
+    },
+  });
+
+  await panel.handleSettingsPanelInteraction({
+    customId: 'stg:set:model:preset:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    values: ['gpt-5.4'],
+    async update(payload) {
+      updates.push(payload);
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+    async showModal() {
+      throw new Error('should not show modal');
+    },
+  });
+
+  assert.equal(session.model, 'gpt-5.4');
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].content, /Active: Model/);
+  assert.match(updates[0].content, /model: `gpt-5.4` \(this channel\)/);
+});
+
+test('createSettingsPanel applies compact model panel selection without expanding settings', async () => {
+  const session = {
+    provider: 'codex',
+    language: 'en',
+    mode: 'safe',
+    model: null,
+  };
+  const updates = [];
+  const panel = createPanel({
+    session,
+    commandActions: {
+      setModel(currentSession, value) {
+        currentSession.model = String(value || '').trim().toLowerCase() === 'default' ? null : value;
+        return { model: currentSession.model };
+      },
+    },
+  });
+
+  await panel.handleSettingsPanelInteraction({
+    customId: 'stg:set:quick_model:preset:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    values: ['gpt-5.4'],
+    async update(payload) {
+      updates.push(payload);
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+    async showModal() {
+      throw new Error('should not show modal');
+    },
+  });
+
+  assert.equal(session.model, 'gpt-5.4');
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].content, /^\*\*Model\*\*/);
+  assert.doesNotMatch(updates[0].content, /Active:/);
+  assert.match(updates[0].content, /model: `gpt-5.4` \(this channel\)/);
+});
+
+test('createSettingsPanel applies effort from the model section without leaving it', async () => {
+  const session = {
+    provider: 'codex',
+    language: 'zh',
+    mode: 'safe',
+    effort: null,
+  };
+  const updates = [];
+  const panel = createPanel({
+    session,
+    commandActions: {
+      setReasoningEffort(currentSession, value) {
+        currentSession.effort = value === 'default' ? null : value;
+        return { effort: currentSession.effort };
+      },
+    },
+  });
+
+  await panel.handleSettingsPanelInteraction({
+    customId: 'stg:set:model_effort:xhigh:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    async update(payload) {
+      updates.push(payload);
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+    async showModal() {
+      throw new Error('should not show modal');
+    },
+  });
+
+  assert.equal(session.effort, 'xhigh');
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].content, /当前项：模型/);
+  assert.match(updates[0].content, /effort：`xhigh`（当前频道）/);
 });
 
 test('createSettingsPanel opens a model modal from the model section', async () => {
