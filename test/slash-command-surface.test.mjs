@@ -119,6 +119,21 @@ test('buildSlashCommands exposes gemini as provider choice', () => {
   assert.deepEqual(choices, ['codex', 'claude', 'gemini', 'status']);
 });
 
+test('buildSlashCommands lets model open panel or set effort', () => {
+  const commands = buildSlashCommands({
+    SlashCommandBuilder: MockSlashCommandBuilder,
+    slashPrefix: 'cx',
+    botProvider: 'codex',
+  }).map((command) => command.toJSON());
+
+  const model = commands.find((command) => command.name === 'cx_model');
+  assert.equal(model.options[0].name, 'name');
+  assert.equal(model.options[0].required, false);
+  assert.equal(model.options[1].name, 'effort');
+  assert.equal(model.options[1].required, false);
+  assert.deepEqual(model.options[1].choices.map((choice) => choice.value), ['xhigh', 'high', 'medium', 'low', 'default']);
+});
+
 test('buildSlashCommands gives provider-native alias descriptions to session aliases', () => {
   const commands = buildSlashCommands({
     SlashCommandBuilder: MockSlashCommandBuilder,

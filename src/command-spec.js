@@ -198,9 +198,14 @@ export function buildSlashCommandEntries({ botProvider = null } = {}) {
     },
     {
       name: 'model',
-      description: '切换当前 provider 模型',
+      description: '切换模型，或打开模型与推理力度设置',
       configure(builder) {
-        return builder.addStringOption(o => o.setName('name').setDescription('模型名（如 o3, gpt-5.3-codex）或 default').setRequired(true));
+        let next = builder.addStringOption(o => o.setName('name').setDescription('模型名（如 o3, gpt-5.3-codex）或 default；留空打开面板').setRequired(false));
+        if (effortChoices.length) {
+          next = next.addStringOption(o => o.setName('effort').setDescription('推理力度').setRequired(false)
+            .addChoices(...effortChoices));
+        }
+        return next;
       },
     },
     (!lockedProvider || lockedProvider === 'codex') && {

@@ -6,15 +6,15 @@ import {
   parseCommandActionButtonId,
 } from '../src/slash-command-router.js';
 
-function createInteraction(commandName) {
+function createInteraction(commandName, optionValues = {}) {
   return {
     commandName,
     channelId: 'channel-1',
     channel: { id: 'channel-1' },
     user: { id: 'user-1' },
     options: {
-      getString() {
-        return null;
+      getString(name) {
+        return optionValues[name] ?? null;
       },
     },
   };
@@ -28,6 +28,7 @@ function createRouterState(overrides = {}) {
   const retryCalls = [];
   const browseCalls = [];
   const settingsCalls = [];
+  const modelSettingsCalls = [];
   let fastModeSetting = { enabled: false, supported: true, source: 'config.toml' };
   let runtimeModeSetting = { mode: 'normal', supported: true, source: 'env default' };
   let retryOutcome = { ok: true, enqueued: true, queuedAhead: 0 };
@@ -56,7 +57,10 @@ function createRouterState(overrides = {}) {
       setWorkspaceDir: () => ({}),
       setDefaultWorkspaceDir: () => ({}),
       setProvider: () => ({ previous: 'codex' }),
-      setModel: () => ({ model: null }),
+      setModel(currentSession, value) {
+        currentSession.model = String(value || '').trim().toLowerCase() === 'default' ? null : value;
+        return { model: currentSession.model };
+      },
       setFastMode(_session, enabled) {
         fastModeSetting = { enabled: Boolean(enabled), supported: true, source: enabled === null ? 'config.toml' : 'session override' };
         return { fastModeSetting };
@@ -66,7 +70,10 @@ function createRouterState(overrides = {}) {
         session.runtimeMode = mode;
         return { runtimeMode: mode };
       },
-      setReasoningEffort: () => ({ effort: null }),
+      setReasoningEffort(currentSession, value) {
+        currentSession.effort = String(value || '').trim().toLowerCase() === 'default' ? null : value;
+        return { effort: currentSession.effort };
+      },
       applyCompactConfig() {},
       setMode: () => ({ mode: 'safe' }),
       bindSession: () => ({ providerLabel: 'Codex', sessionId: 'sid' }),
@@ -151,6 +158,11 @@ function createRouterState(overrides = {}) {
       settingsCalls.push(payload);
       return payload;
     },
+    openModelSettingsPanel: ({ key, userId, flags }) => {
+      const payload = { content: `model-settings:${key}:${userId}`, components: [], flags };
+      modelSettingsCalls.push(payload);
+      return payload;
+    },
     resolvePath: (value) => value,
     safeError: (err) => String(err?.message || err),
     ...overrides,
@@ -168,6 +180,7 @@ function createRouterState(overrides = {}) {
       retryOutcome = value;
     },
     getSettingsCalls: () => [...settingsCalls],
+    getModelSettingsCalls: () => [...modelSettingsCalls],
     getFastModeSetting: () => fastModeSetting,
     getRuntimeModeSetting: () => runtimeModeSetting,
     getCloseRuntimeCalls: () => [...closeRuntimeCalls],
@@ -191,6 +204,48 @@ test('createSlashCommandRouter routes new command through new-session handler', 
     content: '🆕 已切换到新会话。\n下一条普通消息会开启新的上下文。',
     flags: 64,
   }]);
+});
+
+test('createSlashCommandRouter opens compact model panel when model command has no options', async () => {
+  const state = createRouterState();
+
+  const handled = await state.router({
+    interaction: createInteraction('cx_model'),
+    commandName: 'model',
+    respond: async (payload) => {
+      state.replies.push(payload);
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(state.getModelSettingsCalls(), [{
+    content: 'model-settings:channel-1:user-1',
+    components: [],
+    flags: 64,
+  }]);
+  assert.deepEqual(state.replies, [{
+    content: 'model-settings:channel-1:user-1',
+    components: [],
+    flags: 64,
+  }]);
+});
+
+test('createSlashCommandRouter model command can update model and effort together', async () => {
+  const state = createRouterState();
+
+  const handled = await state.router({
+    interaction: createInteraction('cx_model', { name: 'gpt-5.4', effort: 'xhigh' }),
+    commandName: 'model',
+    respond: async (payload) => {
+      state.replies.push(payload);
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.equal(state.session.model, 'gpt-5.4');
+  assert.equal(state.session.effort, 'xhigh');
+  assert.deepEqual(state.replies, ['✅ model = gpt-5.4，effort = xhigh']);
+  assert.deepEqual(state.getCloseRuntimeCalls(), [{ key: 'channel-1', reason: 'runtime config changed' }]);
 });
 
 test('createSlashCommandRouter routes abort alias to cancel handler', async () => {

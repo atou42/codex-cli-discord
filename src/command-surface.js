@@ -105,6 +105,7 @@ export function createCommandSurface({
     formatCompactConfigReport: reports.formatCompactConfigReport,
     openWorkspaceBrowser: workspaceBrowser.openWorkspaceBrowser,
     openSettingsPanel: settingsPanel.openSettingsPanel,
+    openModelSettingsPanel: settingsPanel.openModelSettingsPanel,
   });
 
   const handleCommand = createTextCommandHandler({

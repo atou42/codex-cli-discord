@@ -104,6 +104,7 @@ export function createSlashCommandRouter({
   retryLastPrompt,
   openWorkspaceBrowser,
   openSettingsPanel,
+  openModelSettingsPanel,
   resolvePath,
   safeError,
 } = {}) {
@@ -292,9 +293,45 @@ export function createSlashCommandRouter({
 
   registerSlashHandlers(handlers, ['model'], async ({ interaction, key, session, respond }) => {
     const name = interaction.options.getString('name');
-    const { model } = commandActions.setModel(session, name);
+    const effort = interaction.options.getString('effort');
+    const provider = getSessionProvider(session);
+    const language = getSessionLanguage(session);
+
+    if (!name && !effort) {
+      if (typeof openModelSettingsPanel === 'function') {
+        await respond(openModelSettingsPanel({
+          key,
+          session,
+          userId: interaction.user.id,
+          flags: 64,
+        }));
+        return;
+      }
+      await respond({
+        content: language === 'en' ? '❌ Model settings panel is unavailable.' : '❌ 当前环境没有可用的 model 设置面板。',
+        flags: 64,
+      });
+      return;
+    }
+
+    const updates = [];
+    if (name) {
+      const { model } = commandActions.setModel(session, name);
+      updates.push(`model = ${model || '(provider default)'}`);
+    }
+    if (effort) {
+      if (effort !== 'default' && !isReasoningEffortSupported(provider, effort)) {
+        await respond({
+          content: formatReasoningEffortUnsupported(provider, language),
+          flags: 64,
+        });
+        return;
+      }
+      const { effort: updatedEffort } = commandActions.setReasoningEffort(session, effort);
+      updates.push(`effort = ${updatedEffort || '(provider default)'}`);
+    }
     closeRuntimeForKey(key);
-    await respond(`✅ model = ${model || '(provider default)'}`);
+    await respond(`✅ ${updates.join('，')}`);
   });
 
   registerSlashHandlers(handlers, ['fast'], async ({ interaction, session, respond }) => {
@@ -365,7 +402,7 @@ export function createSlashCommandRouter({
   registerSlashHandlers(handlers, ['effort'], async ({ interaction, key, session, respond }) => {
     const level = interaction.options.getString('level');
     const provider = getSessionProvider(session);
-    if (!isReasoningEffortSupported(provider, level)) {
+    if (level !== 'default' && !isReasoningEffortSupported(provider, level)) {
       await respond({
         content: formatReasoningEffortUnsupported(provider, getSessionLanguage(session)),
         flags: 64,
