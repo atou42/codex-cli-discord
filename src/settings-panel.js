@@ -197,6 +197,77 @@ function chunk(items, size) {
   return out;
 }
 
+function truncateOptionText(value, maxLength = 100) {
+  const text = String(value || '').trim();
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 1);
+}
+
+function normalizeModelCatalog(catalog) {
+  const models = Array.isArray(catalog?.models) ? catalog.models : [];
+  return {
+    models: models.map((model) => {
+      const slug = String(model?.slug || '').trim();
+      const displayName = String(model?.displayName || model?.display_name || slug).trim();
+      const levels = Array.isArray(model?.supportedReasoningLevels)
+        ? model.supportedReasoningLevels
+        : model?.supported_reasoning_levels;
+      const supportedReasoningLevels = Array.isArray(levels)
+        ? levels.map((level) => String(level?.effort || level || '').trim()).filter(Boolean)
+        : [];
+      return {
+        slug,
+        displayName: displayName || slug,
+        description: String(model?.description || '').trim(),
+        defaultReasoningLevel: String(model?.defaultReasoningLevel || model?.default_reasoning_level || '').trim(),
+        supportedReasoningLevels,
+      };
+    }).filter((model) => model.slug),
+    error: catalog?.error ? String(catalog.error) : null,
+  };
+}
+
+function buildModelSelectOptions(snapshot, session) {
+  const currentOverride = String(session?.model || '').trim();
+  const options = [{
+    label: snapshot.language === 'en' ? 'Use provider default' : '使用 provider 默认',
+    value: 'default',
+    description: truncateOptionText(snapshot.language === 'en'
+      ? `Effective: ${snapshot.modelValue || '(provider default)'}`
+      : `当前生效：${snapshot.modelValue || 'provider 默认'}`),
+    default: !currentOverride,
+  }];
+  const seen = new Set(['default']);
+  let hasCurrentOverride = !currentOverride;
+
+  for (const model of snapshot.modelCatalog.models) {
+    if (seen.has(model.slug)) continue;
+    seen.add(model.slug);
+    const isCurrent = currentOverride === model.slug;
+    if (isCurrent) hasCurrentOverride = true;
+    options.push({
+      label: truncateOptionText(model.displayName || model.slug),
+      value: model.slug,
+      description: truncateOptionText(model.defaultReasoningLevel
+        ? `default effort: ${model.defaultReasoningLevel}`
+        : (model.description || model.slug)),
+      default: isCurrent,
+    });
+    if (options.length >= 25) break;
+  }
+
+  if (!hasCurrentOverride && currentOverride && options.length < 25) {
+    options.push({
+      label: truncateOptionText(currentOverride),
+      value: currentOverride,
+      description: snapshot.language === 'en' ? 'Current custom model' : '当前手写模型',
+      default: true,
+    });
+  }
+
+  return options;
+}
+
 export function createSettingsPanel({
   botProvider = null,
   defaultUiLanguage = 'zh',
@@ -216,6 +287,7 @@ export function createSettingsPanel({
   getDefaultCodexProfile = () => ({ profile: null, source: 'env default' }),
   getProviderDisplayName = (provider) => String(provider || ''),
   getSupportedReasoningEffortLevels = () => [],
+  getModelCatalog = () => ({ models: [], error: null }),
   getProviderCompactCapabilities = () => ({ strategies: ['hard', 'native', 'off'] }),
   normalizeUiLanguage = normalizeLanguage,
   resolveModelSetting = (session) => ({ value: session?.model || '(provider default)', source: session?.model ? 'session override' : 'provider' }),
@@ -280,6 +352,7 @@ export function createSettingsPanel({
     const replyDefault = getReplyDeliveryDefault(session);
     const workspace = getWorkspaceBinding(session, key) || { workspaceDir: null, source: 'unset' };
     const effortLevels = getSupportedReasoningEffortLevels(provider);
+    const modelCatalog = normalizeModelCatalog(provider === 'codex' ? getModelCatalog(provider) : { models: [] });
 
     return {
       language,
@@ -298,6 +371,7 @@ export function createSettingsPanel({
       replyDefault,
       workspace,
       effortLevels,
+      modelCatalog,
       modelValue: modelSetting?.value || defaults.model,
       modelSource: modelSetting?.source || defaults.source,
       effortValue: effortLevels.length ? (effortSetting?.value || defaults.effort) : null,
@@ -332,6 +406,46 @@ export function createSettingsPanel({
         .setLabel(formatSectionButtonLabel('close', language))
         .setStyle(ButtonStyle.Danger),
     );
+  }
+
+  function buildModelControlRows(session, userId, snapshot, { quick = false } = {}) {
+    const modelTarget = quick ? 'quick_model' : 'model';
+    const effortTarget = quick ? 'quick_model_effort' : 'model_effort';
+    const modelOptions = buildModelSelectOptions(snapshot, session);
+    const rows = [
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(buildSettingsComponentId('set', modelTarget, 'preset', userId))
+          .setPlaceholder(snapshot.language === 'en'
+            ? `Current model: ${snapshot.modelValue || '(provider default)'}`
+            : `当前模型：${snapshot.modelValue || 'provider 默认'}`)
+          .addOptions(modelOptions),
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(buildSettingsComponentId('act', modelTarget, 'custom', userId))
+          .setLabel(snapshot.language === 'en' ? 'Type custom model' : '手写模型名')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(buildSettingsComponentId('act', modelTarget, 'default', userId))
+          .setLabel(snapshot.language === 'en' ? 'Use provider default' : '使用 provider 默认')
+          .setStyle(!session?.model ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      ),
+    ];
+    if (snapshot.effortLevels.length) {
+      rows.push(...chunk([...snapshot.effortLevels, 'default'], 5).map((rowValues) => new ActionRowBuilder().addComponents(
+        ...rowValues.map((value) => {
+          const selected = value === 'default'
+            ? !session?.effort
+            : session?.effort === value;
+          return new ButtonBuilder()
+            .setCustomId(buildSettingsComponentId('set', effortTarget, value, userId))
+            .setLabel(value)
+            .setStyle(selected ? ButtonStyle.Primary : ButtonStyle.Secondary);
+        }),
+      )));
+    }
+    return rows;
   }
 
   function buildSectionControls(key, session, userId, activeSection, snapshot) {
@@ -572,18 +686,7 @@ export function createSettingsPanel({
       }
 
       case 'model':
-        return [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(buildSettingsComponentId('act', 'model', 'custom', userId))
-              .setLabel(snapshot.language === 'en' ? 'Set custom model' : '设置自定义模型')
-              .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-              .setCustomId(buildSettingsComponentId('act', 'model', 'default', userId))
-              .setLabel(snapshot.language === 'en' ? 'Use provider default' : '使用 provider 默认')
-              .setStyle(!session?.model ? ButtonStyle.Primary : ButtonStyle.Secondary),
-          ),
-        ];
+        return buildModelControlRows(session, userId, snapshot);
 
       case 'workspace':
         return [
@@ -641,8 +744,8 @@ function formatOverviewSection(snapshot) {
           : 'Codex profile 决定当前频道向 Codex 传哪个命名 profile。跟随表示继续继承。provider 默认表示不传 `--profile`。';
       case 'model':
         return snapshot.language === 'en'
-          ? 'Set a custom model string with the modal, or clear the channel override and fall back to the provider default.'
-          : '可以通过弹窗输入自定义模型名，也可以清掉当前频道覆盖，回退到 provider 默认模型。';
+          ? 'Choose a model from the Codex CLI catalog, type a custom model, or tune effort here. Provider default clears this channel override.'
+          : '可以从 Codex CLI 读取到的模型里选择，也可以手写模型名。推理力度也放在这里一起调，使用 provider 默认会清掉当前频道覆盖。';
       case 'fast':
         return snapshot.language === 'en'
           ? (snapshot.isThread
@@ -728,6 +831,11 @@ function formatOverviewSection(snapshot) {
           snapshot.language === 'en'
             ? `• model: ${formatValueLabel(snapshot.modelValue, '(provider default)', snapshot.language)} (${formatSettingSourceLabel(snapshot.modelSource, snapshot.language)})`
             : `• model：${formatValueLabel(snapshot.modelValue, '（provider 默认）', snapshot.language)}（${formatSettingSourceLabel(snapshot.modelSource, snapshot.language)}）`,
+          snapshot.provider === 'codex' && snapshot.modelCatalog.error
+            ? (snapshot.language === 'en'
+              ? `• model catalog: unavailable (${truncateOptionText(snapshot.modelCatalog.error, 120)})`
+              : `• 模型列表：暂不可用（${truncateOptionText(snapshot.modelCatalog.error, 120)}）`)
+            : null,
           snapshot.fastMode.supported
             ? (snapshot.language === 'en'
               ? `• fast mode: ${formatFastModeLabel(snapshot.fastMode.enabled, snapshot.language)} (${formatSettingSourceLabel(snapshot.fastMode.source, snapshot.language)})`
@@ -794,7 +902,55 @@ function formatOverviewSection(snapshot) {
     return payload;
   }
 
-  function buildModelModal(session, userId, { useGlobalDefault = false } = {}) {
+  function formatModelSettingsContent(key, session, notice = '') {
+    const snapshot = buildSnapshot(key, session);
+    const lines = [
+      snapshot.language === 'en' ? '**Model**' : '**模型**',
+      notice || null,
+      snapshot.language === 'en'
+        ? `• model: ${formatValueLabel(snapshot.modelValue, '(provider default)', snapshot.language)} (${formatSettingSourceLabel(snapshot.modelSource, snapshot.language)})`
+        : `• model：${formatValueLabel(snapshot.modelValue, '（provider 默认）', snapshot.language)}（${formatSettingSourceLabel(snapshot.modelSource, snapshot.language)}）`,
+      snapshot.provider === 'codex' && snapshot.modelCatalog.error
+        ? (snapshot.language === 'en'
+          ? `• model catalog: unavailable (${truncateOptionText(snapshot.modelCatalog.error, 120)})`
+          : `• 模型列表：暂不可用（${truncateOptionText(snapshot.modelCatalog.error, 120)}）`)
+        : null,
+      snapshot.effortLevels.length
+        ? (snapshot.language === 'en'
+          ? `• effort: ${formatValueLabel(snapshot.effortValue, '(provider default)', snapshot.language)} (${formatSettingSourceLabel(snapshot.effortSource, snapshot.language)})`
+          : `• effort：${formatValueLabel(snapshot.effortValue, '（provider 默认）', snapshot.language)}（${formatSettingSourceLabel(snapshot.effortSource, snapshot.language)}）`)
+        : (snapshot.language === 'en'
+          ? `• effort: not exposed on ${snapshot.providerLabel}`
+          : `• effort：${snapshot.providerLabel} 当前未暴露`),
+      '',
+      snapshot.language === 'en'
+        ? 'Choose a model from the CLI catalog, type a custom model, or set effort below.'
+        : '从 CLI 读取到的模型里选择，也可以手写模型名；推理力度在下面一起调。',
+    ];
+    return lines.filter(Boolean).join('\n');
+  }
+
+  function buildModelSettingsPayload({ key, session, userId, flags = undefined, notice = '' } = {}) {
+    const snapshot = buildSnapshot(key, session);
+    const closeLabel = snapshot.language === 'en' ? 'close' : '关闭';
+    const components = [
+      ...buildModelControlRows(session, userId, snapshot, { quick: true }),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(buildSettingsComponentId('act', 'quick_model', 'close', userId))
+          .setLabel(closeLabel)
+          .setStyle(ButtonStyle.Danger),
+      ),
+    ];
+    const payload = {
+      content: formatModelSettingsContent(key, session, notice),
+      components,
+    };
+    if (flags !== undefined) payload.flags = flags;
+    return payload;
+  }
+
+  function buildModelModal(session, userId, { useGlobalDefault = false, target = '' } = {}) {
     const language = normalizeUiLanguage(getSessionLanguage(session) || defaultUiLanguage);
     const defaults = useGlobalDefault ? (getProviderDefaults('codex') || {}) : null;
     const input = new TextInputBuilder()
@@ -817,7 +973,7 @@ function formatOverviewSection(snapshot) {
     }
 
     return new ModalBuilder()
-      .setCustomId(buildSettingsModalId(useGlobalDefault ? 'default_model' : 'model', userId))
+      .setCustomId(buildSettingsModalId(target || (useGlobalDefault ? 'default_model' : 'model'), userId))
       .setTitle(useGlobalDefault
         ? (language === 'en' ? 'Set global default model' : '设置全局默认 model')
         : (language === 'en' ? 'Set custom model' : '设置自定义模型'))
@@ -923,8 +1079,21 @@ function formatOverviewSection(snapshot) {
         return true;
       }
 
+      if (parsed.target === 'quick_model' && parsed.value === 'close') {
+        await interaction.update({
+          content: language === 'en' ? 'Model panel closed.' : '模型面板已关闭。',
+          components: [],
+        });
+        return true;
+      }
+
       if (parsed.target === 'model' && parsed.value === 'custom') {
         await interaction.showModal(buildModelModal(session, interaction.user.id));
+        return true;
+      }
+
+      if (parsed.target === 'quick_model' && parsed.value === 'custom') {
+        await interaction.showModal(buildModelModal(session, interaction.user.id, { target: 'quick_model' }));
         return true;
       }
 
@@ -957,6 +1126,18 @@ function formatOverviewSection(snapshot) {
           userId: interaction.user.id,
           activeSection: 'model',
           notice: language === 'en' ? '✅ Model now follows the provider default.' : '✅ 当前 model 已改为跟随 provider 默认。',
+        }));
+        return true;
+      }
+
+      if (parsed.target === 'quick_model' && parsed.value === 'default') {
+        commandActions.setModel?.(session, 'default');
+        closeRuntimeForKey(key);
+        await interaction.update(buildModelSettingsPayload({
+          key,
+          session,
+          userId: interaction.user.id,
+          notice: language === 'en' ? 'Model now follows the provider default.' : '当前 model 已改为跟随 provider 默认。',
         }));
         return true;
       }
@@ -1052,7 +1233,18 @@ function formatOverviewSection(snapshot) {
     }
 
     if (parsed.kind === 'set') {
-      if (parsed.target === 'provider' && !botProvider) {
+      if ((parsed.target === 'model' || parsed.target === 'quick_model') && parsed.value === 'preset') {
+        const selectedModel = String(interaction.values?.[0] || '').trim();
+        if (!selectedModel) {
+          await interaction.reply({
+            content: language === 'en' ? '❌ No model selected.' : '❌ 没有选择模型。',
+            flags: 64,
+          });
+          return true;
+        }
+        commandActions.setModel?.(session, selectedModel);
+        closeRuntimeForKey(key);
+      } else if (parsed.target === 'provider' && !botProvider) {
         commandActions.setProvider?.(session, parsed.value);
         closeRuntimeForKey(key);
       } else if (parsed.target === 'profile') {
@@ -1075,7 +1267,7 @@ function formatOverviewSection(snapshot) {
         closeRuntimeForKey(key);
       } else if (parsed.target === 'default_effort') {
         commandActions.setGlobalReasoningEffortDefault?.(session, parsed.value);
-      } else if (parsed.target === 'effort') {
+      } else if (parsed.target === 'effort' || parsed.target === 'model_effort' || parsed.target === 'quick_model_effort') {
         commandActions.setReasoningEffort?.(session, parsed.value);
         closeRuntimeForKey(key);
       } else if (parsed.target === 'compact') {
@@ -1088,13 +1280,26 @@ function formatOverviewSection(snapshot) {
         commandActions.setGlobalCodexProfileDefault?.(session, parsed.value);
       }
 
+      if (parsed.target === 'quick_model' || parsed.target === 'quick_model_effort') {
+        await interaction.update(buildModelSettingsPayload({
+          key,
+          session,
+          userId: interaction.user.id,
+        }));
+        return true;
+      }
+
       await interaction.update(buildSettingsPayload({
         key,
         session,
         userId: interaction.user.id,
         activeSection: parsed.target === 'default_reply'
           ? 'reply'
-          : (parsed.target.startsWith('default_') ? 'defaults' : parsed.target),
+          : (parsed.target === 'model' && parsed.value === 'preset')
+            ? 'model'
+            : (parsed.target === 'model_effort')
+              ? 'model'
+              : (parsed.target.startsWith('default_') ? 'defaults' : parsed.target),
         activeDefaultsGroup: parsed.target === 'default_effort'
           ? 'effort'
           : (parsed.target === 'default_fast'
@@ -1148,6 +1353,20 @@ function formatOverviewSection(snapshot) {
         activeSection: 'model',
         flags: 64,
         notice: language === 'en' ? '✅ Model updated. This is the latest settings panel.' : '✅ model 已更新。这是最新的设置面板。',
+      }));
+      return true;
+    }
+
+    if (parsed.target === 'quick_model') {
+      const rawValue = String(interaction.fields.getTextInputValue(MODEL_INPUT_ID) || '').trim();
+      commandActions.setModel?.(session, rawValue);
+      closeRuntimeForKey(key);
+      await interaction.reply(buildModelSettingsPayload({
+        key,
+        session,
+        userId: interaction.user.id,
+        flags: 64,
+        notice: language === 'en' ? 'Model updated.' : 'model 已更新。',
       }));
       return true;
     }
@@ -1233,6 +1452,7 @@ function formatOverviewSection(snapshot) {
 
   return {
     openSettingsPanel: (options = {}) => buildSettingsPayload(options),
+    openModelSettingsPanel: (options = {}) => buildModelSettingsPayload(options),
     handleSettingsPanelInteraction,
     handleSettingsPanelModalSubmit,
     isSettingsPanelComponentId,

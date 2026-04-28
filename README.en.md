@@ -74,9 +74,10 @@ Examples below use the default Codex/shared prefix `cx_`; a dedicated Claude bot
 - `/cx_settings` — open the interactive channel settings panel for provider, model, fast mode, effort, compact, mode, language, and workspace
 - `/cx_setdir <path|default|status>` — set or clear workspace for current thread
 - `/cx_setdefaultdir <path|clear|status>` — set provider default workspace
-- `/cx_model <name|default>` — set model override
+- `/cx_model` — open a compact model panel with CLI-read model choices, custom model input, and effort controls
+- `/cx_model name:<name|default> effort:<...>` — set model and reasoning effort directly; `name` and `effort` are both optional
 - `/cx_fast <on|off|status|default>` — toggle Codex Fast mode for the current channel; only exposed for Codex, and `default` falls back to `[features].fast_mode` in `~/.codex/config.toml`, which now defaults to on when unset
-- `/cx_effort <...>` — set reasoning effort; Codex supports `xhigh|high|medium|low|default`, Claude supports `high|medium|low|default`, and Gemini does not expose this command
+- `/cx_effort <...>` — compatibility shortcut for reasoning effort; prefer `/cx_model` for normal use
 - `/cx_compact key:<...> value:<...>` — configure compact for the current channel; all three providers support `strategy|token_limit|enabled|reset|status`, while `native_limit` only works where the provider exposes a native limit override (currently mainly Codex)
 - `/cx_mode <safe|dangerous>` — set execution mode
 - `/cx_name <label>` — name the session (for display)

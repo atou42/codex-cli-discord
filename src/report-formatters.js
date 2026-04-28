@@ -985,12 +985,13 @@ export function createReportFormatters({
         `• \`${slashRef('setdir')} path:<...>\` / \`${slashRef('setdefaultdir')} path:<...>\` — workspace controls`,
         '',
         '**Model & Runtime**',
-        '• `!model <name|default>` — set model override',
+        `• \`${slashRef('model')}\` — choose model and effort from a compact panel`,
+        reasoningLevels.length
+          ? `• \`${slashRef('model')} name:<name|default> effort:<${[...reasoningLevels, 'default'].join('|')}>\` / \`!model <name|default>\` — set model or effort directly`
+          : `• \`${slashRef('model')} name:<name|default>\` / \`!model <name|default>\` — set model directly`,
         provider === 'codex' ? `• \`${slashRef('fast')} <on|off|status|default>\` / \`!fast <...>\` — toggle Codex Fast mode for this channel` : null,
         provider === 'claude' ? `• \`${slashRef('runtime')} <normal|long|status|default>\` / \`!runtime <...>\` — switch Claude runtime mode for this channel` : null,
-        reasoningLevels.length
-          ? `• \`!effort <${[...reasoningLevels, 'default'].join('|')}>\` — reasoning effort`
-          : `• reasoning effort — not exposed by current provider (${getProviderDisplayName(provider)})`,
+        reasoningLevels.length ? null : `• effort — not exposed by current provider (${getProviderDisplayName(provider)})`,
         compact.supportsNativeLimit
           ? `• \`${slashRef('compact')} key:<...> value:<...>\` / \`!compact <...>\` — context compaction config (native + native_limit available on current provider)`
           : compact.supportsNativeStrategy
@@ -1037,14 +1038,15 @@ export function createReportFormatters({
       '• `!cd <...>` — 同 `!setdir` 的别名',
       '• `!setdefaultdir <path|browse|clear|status>` — 设置当前 provider 的默认 workspace',
       `• \`${slashRef('setdir')} path:<...>\` / \`${slashRef('setdefaultdir')} path:<...>\` — workspace 控制`,
-      '',
-      '**模型 & 执行**',
-      '• `!model <name|default>` — 切换模型（如 gpt-5.3-codex, o3）',
-      provider === 'codex' ? `• \`${slashRef('fast')} <on|off|status|default>\` / \`!fast <...>\` — 切换当前频道的 Codex Fast mode` : null,
-      provider === 'claude' ? `• \`${slashRef('runtime')} <normal|long|status|default>\` / \`!runtime <...>\` — 切换当前频道的 Claude 接入方式` : null,
-      reasoningLevels.length
-        ? `• \`!effort <${[...reasoningLevels, 'default'].join('|')}>\` — reasoning effort`
-        : `• reasoning effort — 当前 provider (${getProviderDisplayName(provider)}) 未暴露`,
+        '',
+        '**模型 & 执行**',
+        `• \`${slashRef('model')}\` — 打开只包含模型和推理力度的小面板`,
+        reasoningLevels.length
+          ? `• \`${slashRef('model')} name:<name|default> effort:<${[...reasoningLevels, 'default'].join('|')}>\` / \`!model <name|default>\` — 直接设置 model 或 effort`
+          : `• \`${slashRef('model')} name:<name|default>\` / \`!model <name|default>\` — 直接设置 model`,
+        provider === 'codex' ? `• \`${slashRef('fast')} <on|off|status|default>\` / \`!fast <...>\` — 切换当前频道的 Codex Fast mode` : null,
+        provider === 'claude' ? `• \`${slashRef('runtime')} <normal|long|status|default>\` / \`!runtime <...>\` — 切换当前频道的 Claude 接入方式` : null,
+      reasoningLevels.length ? null : `• effort — 当前 provider (${getProviderDisplayName(provider)}) 未暴露`,
       compact.supportsNativeLimit
         ? `• \`${slashRef('compact')} key:<...> value:<...>\` / \`!compact <...>\` — 上下文压缩配置（当前 provider 支持 native 与 native_limit）`
         : compact.supportsNativeStrategy
