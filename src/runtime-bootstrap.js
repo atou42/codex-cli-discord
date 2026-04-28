@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
@@ -6,6 +7,7 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { autoRepairProxyEnv } from './proxy-env.js';
 
 const FEATURES_SECTION = 'features';
+const CODEX_MODEL_CATALOG_CACHE = new Map();
 
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -176,6 +178,67 @@ export function readCodexProfileCatalog({ env = process.env } = {}) {
       profiles: [],
       configPath: resolveCodexConfigPath({ env }),
     };
+  }
+}
+
+function normalizeCodexModelCatalog(raw) {
+  const parsed = JSON.parse(String(raw || ''));
+  const models = Array.isArray(parsed?.models) ? parsed.models : [];
+  return {
+    models: models.map((model) => {
+      const slug = String(model?.slug || '').trim();
+      const displayName = String(model?.display_name || model?.displayName || slug).trim();
+      const supportedReasoningLevels = Array.isArray(model?.supported_reasoning_levels)
+        ? model.supported_reasoning_levels
+          .map((level) => String(level?.effort || '').trim())
+          .filter(Boolean)
+        : [];
+      return {
+        slug,
+        displayName: displayName || slug,
+        description: String(model?.description || '').trim(),
+        defaultReasoningLevel: String(model?.default_reasoning_level || '').trim() || null,
+        supportedReasoningLevels,
+        visibility: String(model?.visibility || '').trim(),
+      };
+    }).filter((model) => model.slug),
+    error: null,
+  };
+}
+
+export function readCodexModelCatalog({
+  codexBin = 'codex',
+  env = process.env,
+  execFileSyncFn = execFileSync,
+  now = Date.now,
+  ttlMs = 5 * 60_000,
+} = {}) {
+  const bin = String(codexBin || 'codex').trim() || 'codex';
+  const cacheKey = bin;
+  const cached = CODEX_MODEL_CATALOG_CACHE.get(cacheKey);
+  const currentTime = typeof now === 'function' ? now() : Date.now();
+  if (cached && currentTime - cached.timestamp < ttlMs) {
+    return cached.catalog;
+  }
+
+  try {
+    const raw = execFileSyncFn(bin, ['debug', 'models'], {
+      encoding: 'utf-8',
+      env,
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: 5000,
+    });
+    const catalog = normalizeCodexModelCatalog(raw);
+    CODEX_MODEL_CATALOG_CACHE.set(cacheKey, { timestamp: currentTime, catalog });
+    return catalog;
+  } catch (err) {
+    const message = String(err?.message || err || 'unknown error').trim();
+    const catalog = {
+      models: [],
+      error: message || 'unknown error',
+    };
+    CODEX_MODEL_CATALOG_CACHE.set(cacheKey, { timestamp: currentTime, catalog });
+    return catalog;
   }
 }
 

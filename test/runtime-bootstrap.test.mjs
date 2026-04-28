@@ -9,6 +9,7 @@ import {
   createDiscordClient,
   normalizeSlashPrefix,
   readCodexDefaults,
+  readCodexModelCatalog,
   readCodexProfileCatalog,
   renderMissingDiscordTokenHint,
   writeCodexDefaults,
@@ -183,6 +184,58 @@ test('readCodexProfileCatalog reads named codex profiles from config.toml', () =
   assert.deepEqual(readCodexProfileCatalog({ env: { HOME: homeDir } }), {
     profiles: ['default_work', 'vision qa'],
     configPath,
+  });
+});
+
+test('readCodexModelCatalog reads Codex CLI model catalog', () => {
+  const catalog = readCodexModelCatalog({
+    codexBin: 'codex-test',
+    now: () => 1000,
+    execFileSyncFn(bin, args) {
+      assert.equal(bin, 'codex-test');
+      assert.deepEqual(args, ['debug', 'models']);
+      return JSON.stringify({
+        models: [{
+          slug: 'gpt-5.4',
+          display_name: 'gpt-5.4',
+          description: 'Strong model',
+          default_reasoning_level: 'medium',
+          supported_reasoning_levels: [
+            { effort: 'low' },
+            { effort: 'medium' },
+            { effort: 'high' },
+          ],
+          visibility: 'list',
+        }],
+      });
+    },
+  });
+
+  assert.deepEqual(catalog, {
+    models: [{
+      slug: 'gpt-5.4',
+      displayName: 'gpt-5.4',
+      description: 'Strong model',
+      defaultReasoningLevel: 'medium',
+      supportedReasoningLevels: ['low', 'medium', 'high'],
+      visibility: 'list',
+    }],
+    error: null,
+  });
+});
+
+test('readCodexModelCatalog reports CLI catalog errors', () => {
+  const catalog = readCodexModelCatalog({
+    codexBin: 'codex-fail',
+    now: () => 2000,
+    execFileSyncFn() {
+      throw new Error('codex debug models failed');
+    },
+  });
+
+  assert.deepEqual(catalog, {
+    models: [],
+    error: 'codex debug models failed',
   });
 });
 

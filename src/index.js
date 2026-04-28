@@ -131,6 +131,7 @@ import {
   createDiscordClient,
   normalizeSlashPrefix,
   readCodexDefaults,
+  readCodexModelCatalog,
   readCodexProfileCatalog,
   renderMissingDiscordTokenHint,
   writeCodexDefaults,
@@ -601,6 +602,9 @@ const appContext = createAppContext({
       TextInputStyle,
       getProviderDisplayName,
       getSupportedReasoningEffortLevels,
+      getModelCatalog: (provider) => provider === 'codex'
+        ? readCodexModelCatalog({ codexBin: CODEX_BIN, env: SPAWN_ENV })
+        : { models: [], error: null },
       getProviderCompactCapabilities,
       normalizeUiLanguage,
     },
