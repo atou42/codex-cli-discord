@@ -3,6 +3,11 @@ import {
   getActionButtonCommandNames,
   normalizeCommandName,
 } from './command-spec.js';
+import {
+  createCodexForkThread,
+  formatCodexForkResult,
+  normalizeForkSessionId,
+} from './codex-fork-flow.js';
 
 const ACTION_BUTTON_PREFIX = 'cmd';
 const ACTION_BUTTON_COMMANDS = new Set(getActionButtonCommandNames());
@@ -53,6 +58,7 @@ export function createSlashCommandRouter({
   getSession,
   getSessionLanguage,
   getSessionProvider,
+  getSessionId = (session) => session?.runnerSessionId || session?.codexThreadId || null,
   getProviderDisplayName,
   getEffectiveSecurityProfile,
   getRuntimeSnapshot = () => ({ running: false, queued: 0 }),
@@ -102,6 +108,9 @@ export function createSlashCommandRouter({
   cancelChannelWork,
   closeRuntimeSession = () => false,
   retryLastPrompt,
+  forkCodexThread,
+  enqueuePrompt,
+  resolveSecurityContext,
   openWorkspaceBrowser,
   openSettingsPanel,
   openModelSettingsPanel,
@@ -476,6 +485,49 @@ export function createSlashCommandRouter({
         ...notes,
       ].join('\n'));
     closeRuntimeForKey(key, 'resume session');
+  });
+
+  registerSlashHandlers(handlers, ['fork'], async ({ interaction, key, session, respond }) => {
+    const language = getSessionLanguage(session);
+    const provider = getSessionProvider(session);
+    if (provider !== 'codex') {
+      await respond({
+        content: language === 'en'
+          ? `❌ Native fork is only available for Codex. Current provider is ${getProviderDisplayName(provider)}.`
+          : `❌ 原生 fork 只支持 Codex。当前 provider 是 ${getProviderDisplayName(provider)}。`,
+        flags: 64,
+      });
+      return;
+    }
+
+    const requestedSessionId = normalizeForkSessionId(interaction.options.getString('session_id'));
+    const parentSessionId = requestedSessionId || normalizeForkSessionId(getSessionId(session));
+    const prompt = interaction.options.getString('prompt') || '';
+    try {
+      const result = await createCodexForkThread({
+        key,
+        session,
+        source: interaction,
+        parentSessionId,
+        prompt,
+        provider,
+        getRuntimeSnapshot,
+        getSession,
+        commandActions,
+        forkCodexThread,
+        enqueuePrompt,
+        resolveSecurityContext,
+      });
+      await respond({
+        content: formatCodexForkResult(result, language),
+        flags: 64,
+      });
+    } catch (err) {
+      await respond({
+        content: `❌ Codex fork 失败：${safeError(err)}`,
+        flags: 64,
+      });
+    }
   });
 
   registerSlashHandlers(handlers, ['name'], async ({ interaction, session, respond }) => {

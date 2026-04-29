@@ -283,6 +283,15 @@ export function buildSlashCommandEntries({ botProvider = null } = {}) {
         ).setRequired(true));
       },
     },
+    (!lockedProvider || lockedProvider === 'codex') && {
+      name: 'fork',
+      description: '用 Codex 原生 fork 创建一个新的 Discord thread',
+      configure(builder) {
+        return builder
+          .addStringOption(o => o.setName('session_id').setDescription('Codex session UUID；留空使用当前频道绑定').setRequired(false))
+          .addStringOption(o => o.setName('prompt').setDescription('可选：创建 fork 后在新 thread 里立即执行的任务').setRequired(false));
+      },
+    },
     {
       name: 'queue',
       description: '查看当前频道的任务队列状态',

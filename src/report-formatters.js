@@ -423,6 +423,18 @@ export function createReportFormatters({
     return `locked to \`${botProvider}\` (${getProviderDisplayName(botProvider)})`;
   }
 
+  function formatForkParentLine(session, language = 'zh') {
+    const parentSessionId = String(session?.forkedFromSessionId || '').trim();
+    if (!parentSessionId) return null;
+    const provider = String(session?.forkedFromProvider || 'codex').trim() || 'codex';
+    const channelId = String(session?.forkedFromChannelId || '').trim();
+    const channelPart = channelId ? ` <#${channelId}>` : '';
+    if (language === 'en') {
+      return `• forked from: ${getProviderDisplayName(provider)} \`${parentSessionId}\`${channelPart}`;
+    }
+    return `• fork 来源: ${getProviderDisplayName(provider)} \`${parentSessionId}\`${channelPart}`;
+  }
+
   function formatStatusReport(key, session, channel = null, { rateLimitReport = null } = {}) {
     const language = getSessionLanguage(session);
     const lang = normalizeUiLanguage(language);
@@ -473,6 +485,7 @@ export function createReportFormatters({
         `• cli: ${formatCliHealth(cliHealth, lang)}`,
         ...rateLimitLines,
         `• ${sessionFieldLabel}: ${formatSessionStatusLabel(session)}`,
+        formatForkParentLine(session, lang),
         `• last run input tokens: ${formatTokenValue(session?.lastInputTokens)}`,
         `• security profile: ${formatSecurityProfileDisplay(security, lang)}`,
       ].filter(Boolean).join('\n');
@@ -499,6 +512,7 @@ export function createReportFormatters({
       `• CLI: ${formatCliHealth(cliHealth, lang)}`,
       ...rateLimitLines,
       `• ${sessionFieldLabel}: ${formatSessionStatusLabel(session)}`,
+      formatForkParentLine(session, lang),
       `• 上一轮输入 tokens: ${formatTokenValue(session?.lastInputTokens)}`,
       `• security profile: ${formatSecurityProfileDisplay(security, lang)}`,
     ].filter(Boolean).join('\n');
@@ -976,6 +990,7 @@ export function createReportFormatters({
         resumeAlias ? `• current provider alias: \`!${resumeAlias} <session_id>\`` : null,
         '• `!sessions` — list recent provider sessions from the native runtime store',
         sessionsAlias ? `• current provider alias: \`!${sessionsAlias}\`` : null,
+        provider === 'codex' ? `• \`${slashRef('fork')} [session_id] [prompt]\` / \`!fork [session_id] [prompt]\` — create a native Codex fork in a new Discord thread` : null,
         !botProvider ? '• `!provider <codex|claude|gemini|status>` — switch provider for current channel' : null,
         '',
         '**Workspace**',
@@ -1031,6 +1046,7 @@ export function createReportFormatters({
       resumeAlias ? `• 当前 provider 别名：\`!${resumeAlias} <session_id>\`` : null,
       '• `!sessions` — 从 provider 原生运行时存储里列出最近的 sessions',
       sessionsAlias ? `• 当前 provider 别名：\`!${sessionsAlias}\`` : null,
+      provider === 'codex' ? `• \`${slashRef('fork')} [session_id] [prompt]\` / \`!fork [session_id] [prompt]\` — 用 Codex 原生 fork 创建新 Discord thread` : null,
       !botProvider ? '• `!provider <codex|claude|gemini|status>` — 切换当前频道 provider' : null,
       '',
       '**工作目录**',

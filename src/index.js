@@ -133,9 +133,13 @@ import {
   readCodexDefaults,
   readCodexModelCatalog,
   readCodexProfileCatalog,
+  readClaudeModelCatalog,
   renderMissingDiscordTokenHint,
   writeCodexDefaults,
 } from './runtime-bootstrap.js';
+import {
+  forkCodexThread,
+} from './codex-app-server.js';
 import {
   extractInputTokensFromUsage,
   formatTokenValue,
@@ -602,9 +606,11 @@ const appContext = createAppContext({
       TextInputStyle,
       getProviderDisplayName,
       getSupportedReasoningEffortLevels,
-      getModelCatalog: (provider) => provider === 'codex'
-        ? readCodexModelCatalog({ codexBin: CODEX_BIN, env: SPAWN_ENV })
-        : { models: [], error: null },
+      getModelCatalog: (provider) => {
+        if (provider === 'codex') return readCodexModelCatalog({ codexBin: CODEX_BIN, env: SPAWN_ENV });
+        if (provider === 'claude') return readClaudeModelCatalog({ claudeBin: CLAUDE_BIN, env: SPAWN_ENV });
+        return { models: [], error: null };
+      },
       getProviderCompactCapabilities,
       normalizeUiLanguage,
     },
@@ -670,6 +676,7 @@ const appContext = createAppContext({
       parseTimeoutConfigAction,
       parseCompactConfigAction,
       resolvePath,
+      forkCodexThread: (options) => forkCodexThread({ ...options, codexBin: CODEX_BIN, env: SPAWN_ENV }),
       safeError,
     },
     textCommandOptions: {
@@ -694,6 +701,7 @@ const appContext = createAppContext({
       parseWorkspaceCommandAction,
       isReasoningEffortSupported,
       resolvePath,
+      forkCodexThread: (options) => forkCodexThread({ ...options, codexBin: CODEX_BIN, env: SPAWN_ENV }),
       safeError,
     },
   },

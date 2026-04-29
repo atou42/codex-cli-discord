@@ -191,6 +191,10 @@ export function createSessionStore({
         compactThresholdTokens: null,
         nativeCompactTokenLimit: null,
         runtimeMode: null,
+        forkedFromProvider: null,
+        forkedFromSessionId: null,
+        forkedFromChannelId: null,
+        forkedAt: null,
         configOverrides: [],
         updatedAt: new Date().toISOString(),
       };
@@ -318,6 +322,22 @@ export function createSessionStore({
       session.runtimeMode = null;
       migrated = true;
     }
+    if (session.forkedFromProvider === undefined) {
+      session.forkedFromProvider = null;
+      migrated = true;
+    }
+    if (session.forkedFromSessionId === undefined) {
+      session.forkedFromSessionId = null;
+      migrated = true;
+    }
+    if (session.forkedFromChannelId === undefined) {
+      session.forkedFromChannelId = null;
+      migrated = true;
+    }
+    if (session.forkedAt === undefined) {
+      session.forkedAt = null;
+      migrated = true;
+    }
 
     const normalizedWorkspaceDir = normalizeWorkspaceDir(session.workspaceDir);
     if (session.workspaceDir !== normalizedWorkspaceDir) {
@@ -405,6 +425,28 @@ export function createSessionStore({
     const normalizedRuntimeMode = normalizeSessionRuntimeMode(session.runtimeMode);
     if (session.runtimeMode !== normalizedRuntimeMode) {
       session.runtimeMode = normalizedRuntimeMode;
+      migrated = true;
+    }
+    const normalizedForkedFromProvider = session.forkedFromProvider
+      ? normalizeProvider(session.forkedFromProvider)
+      : null;
+    if (session.forkedFromProvider !== normalizedForkedFromProvider) {
+      session.forkedFromProvider = normalizedForkedFromProvider;
+      migrated = true;
+    }
+    const normalizedForkedFromSessionId = normalizeChannelId(session.forkedFromSessionId);
+    if (session.forkedFromSessionId !== normalizedForkedFromSessionId) {
+      session.forkedFromSessionId = normalizedForkedFromSessionId;
+      migrated = true;
+    }
+    const normalizedForkedFromChannelId = normalizeChannelId(session.forkedFromChannelId);
+    if (session.forkedFromChannelId !== normalizedForkedFromChannelId) {
+      session.forkedFromChannelId = normalizedForkedFromChannelId;
+      migrated = true;
+    }
+    const normalizedForkedAt = normalizeChannelId(session.forkedAt);
+    if (session.forkedAt !== normalizedForkedAt) {
+      session.forkedAt = normalizedForkedAt;
       migrated = true;
     }
 

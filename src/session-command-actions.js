@@ -153,6 +153,7 @@ export function createSessionCommandActions({
 
   function setProvider(session, requested) {
     const { previous, provider } = switchSessionProviderState(session, requested, { normalizeProvider });
+    if (previous !== provider) clearForkMetadata(session);
     saveDb();
     return { previous, provider };
   }
@@ -263,6 +264,7 @@ export function createSessionCommandActions({
   function startNewSession(session) {
     clearSessionId(session);
     session.lastInputTokens = null;
+    clearForkMetadata(session);
     saveDb();
     return {
       sessionId: getSessionId(session),
@@ -275,6 +277,7 @@ export function createSessionCommandActions({
     const requestedSessionId = maybeSessionId === undefined ? keyOrSessionId : maybeSessionId;
     const provider = getSessionProvider(session);
     setSessionId(session, requestedSessionId);
+    clearForkMetadata(session);
     const normalizedSessionId = getSessionId(session);
     const displacedKeys = [];
     const sessionWorkspaceDir = resolveStrictProviderSessionWorkspace(provider, normalizedSessionId);
@@ -312,6 +315,41 @@ export function createSessionCommandActions({
       sessionWorkspaceDir,
       adoptedWorkspaceDir,
       missingWorkspaceDir,
+    };
+  }
+
+  function clearForkMetadata(session) {
+    if (!session || typeof session !== 'object') return;
+    session.forkedFromProvider = null;
+    session.forkedFromSessionId = null;
+    session.forkedFromChannelId = null;
+    session.forkedAt = null;
+  }
+
+  function bindForkedSession(session, {
+    sessionId,
+    parentSessionId,
+    parentChannelId,
+    provider = null,
+  } = {}) {
+    const normalizedProvider = normalizeProvider(provider || getSessionProvider(session));
+    const currentProvider = getSessionProvider(session);
+    if (currentProvider !== normalizedProvider) {
+      switchSessionProviderState(session, normalizedProvider, { normalizeProvider });
+    }
+    setSessionId(session, sessionId);
+    session.forkedFromProvider = normalizedProvider;
+    session.forkedFromSessionId = normalizeSessionKey(parentSessionId);
+    session.forkedFromChannelId = normalizeSessionKey(parentChannelId);
+    session.forkedAt = new Date().toISOString();
+    saveDb();
+    return {
+      provider: normalizedProvider,
+      providerLabel: getProviderShortName(normalizedProvider),
+      sessionId: getSessionId(session),
+      parentSessionId: session.forkedFromSessionId,
+      parentChannelId: session.forkedFromChannelId,
+      forkedAt: session.forkedAt,
     };
   }
 
@@ -421,6 +459,7 @@ export function createSessionCommandActions({
     clearSessionId(session);
     session.lastInputTokens = null;
     session.configOverrides = [];
+    clearForkMetadata(session);
     saveDb();
     return { sessionId: getSessionId(session), configOverrides: session.configOverrides };
   }
@@ -474,6 +513,7 @@ export function createSessionCommandActions({
     setMode,
     startNewSession,
     bindSession,
+    bindForkedSession,
     renameSession,
     setWorkspaceDir,
     clearWorkspaceDir,

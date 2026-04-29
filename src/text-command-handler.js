@@ -3,6 +3,12 @@ import {
   getProviderCommandAlias,
   normalizeCommandName,
 } from './command-spec.js';
+import {
+  createCodexForkThread,
+  formatCodexForkResult,
+  normalizeForkSessionId,
+  parseForkTextInput,
+} from './codex-fork-flow.js';
 
 function isExistingDirectory(dir) {
   try {
@@ -12,11 +18,19 @@ function isExistingDirectory(dir) {
   }
 }
 
+function formatModelCommandHelp(provider = 'codex') {
+  if (provider === 'claude') {
+    return '用法：`!model <name|default>`\n例：`!model sonnet` / `!model opus` / `!model default`';
+  }
+  return '用法：`!model <name|default>`\n例：`!model o3` / `!model gpt-5.3-codex` / `!model default`';
+}
+
 export function createTextCommandHandler({
   botProvider = null,
   enableConfigCmd = false,
   getSession,
   saveDb,
+  getSessionId = (session) => session?.runnerSessionId || session?.codexThreadId || null,
   getSessionProvider,
   getSessionLanguage,
   getProviderDisplayName,
@@ -75,8 +89,12 @@ export function createTextCommandHandler({
   providerSupportsCompactConfigAction = () => true,
   providerSupportsRawConfigOverrides = () => false,
   isReasoningEffortSupported,
+  getRuntimeSnapshot = () => ({ running: false, queued: 0 }),
   cancelChannelWork,
   closeRuntimeSession = () => false,
+  forkCodexThread,
+  enqueuePrompt,
+  resolveSecurityContext,
   openWorkspaceBrowser,
   resolvePath,
   safeError,
@@ -372,9 +390,45 @@ export function createTextCommandHandler({
         break;
       }
 
+      case 'fork': {
+        const language = getSessionLanguage(session);
+        const provider = getSessionProvider(session);
+        if (provider !== 'codex') {
+          await safeReply(
+            message,
+            language === 'en'
+              ? `❌ Native fork is only available for Codex. Current provider is ${getProviderDisplayName(provider)}.`
+              : `❌ 原生 fork 只支持 Codex。当前 provider 是 ${getProviderDisplayName(provider)}。`,
+          );
+          return;
+        }
+        const parsed = parseForkTextInput(arg);
+        const parentSessionId = parsed.sessionId || normalizeForkSessionId(getSessionId(session));
+        try {
+          const result = await createCodexForkThread({
+            key,
+            session,
+            source: message,
+            parentSessionId,
+            prompt: parsed.prompt,
+            provider,
+            getRuntimeSnapshot,
+            getSession,
+            commandActions,
+            forkCodexThread,
+            enqueuePrompt,
+            resolveSecurityContext,
+          });
+          await safeReply(message, formatCodexForkResult(result, language));
+        } catch (err) {
+          await safeReply(message, `❌ Codex fork 失败：${safeError(err)}`);
+        }
+        break;
+      }
+
       case 'model': {
         if (!arg) {
-          await safeReply(message, '用法：`!model <name|default>`\n例：`!model o3` / `!model gpt-5.3-codex` / `!model default`');
+          await safeReply(message, formatModelCommandHelp(getSessionProvider(session)));
           return;
         }
         const { model } = commandActions.setModel(session, arg);
