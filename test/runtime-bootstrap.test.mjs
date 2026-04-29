@@ -11,6 +11,8 @@ import {
   readCodexDefaults,
   readCodexModelCatalog,
   readCodexProfileCatalog,
+  readClaudeModelCatalog,
+  readProviderModelCatalog,
   renderMissingDiscordTokenHint,
   writeCodexDefaults,
 } from '../src/runtime-bootstrap.js';
@@ -237,6 +239,64 @@ test('readCodexModelCatalog reports CLI catalog errors', () => {
     models: [],
     error: 'codex debug models failed',
   });
+});
+
+test('readClaudeModelCatalog reads aliases and effort levels from Claude CLI help', () => {
+  const catalog = readClaudeModelCatalog({
+    claudeBin: 'claude-test',
+    now: () => 3000,
+    execFileSyncFn(bin, args) {
+      assert.equal(bin, 'claude-test');
+      assert.deepEqual(args, ['--help']);
+      return [
+        "--effort <level>    Effort level for the current session (low, medium, high)",
+        "--model <model>     Model for the current session. Provide an alias for the latest model (e.g. 'sonnet' or 'opus') or a model's full name (e.g. 'claude-sonnet-4-6').",
+      ].join('\n');
+    },
+  });
+
+  assert.deepEqual(catalog, {
+    models: [
+      {
+        slug: 'sonnet',
+        displayName: 'sonnet',
+        description: 'Claude Code model alias from CLI help',
+        defaultReasoningLevel: null,
+        supportedReasoningLevels: ['low', 'medium', 'high'],
+        visibility: 'help',
+      },
+      {
+        slug: 'opus',
+        displayName: 'opus',
+        description: 'Claude Code model alias from CLI help',
+        defaultReasoningLevel: null,
+        supportedReasoningLevels: ['low', 'medium', 'high'],
+        visibility: 'help',
+      },
+      {
+        slug: 'claude-sonnet-4-6',
+        displayName: 'claude-sonnet-4-6',
+        description: 'Claude Code full model name from CLI help',
+        defaultReasoningLevel: null,
+        supportedReasoningLevels: ['low', 'medium', 'high'],
+        visibility: 'help',
+      },
+    ],
+    error: null,
+  });
+});
+
+test('readProviderModelCatalog dispatches Claude and unknown providers', () => {
+  const claude = readProviderModelCatalog({
+    provider: 'claude',
+    claudeBin: 'claude-provider-test',
+    now: () => 4000,
+    execFileSyncFn() {
+      return "--model <model> (e.g. 'sonnet')";
+    },
+  });
+  assert.equal(claude.models[0].slug, 'sonnet');
+  assert.deepEqual(readProviderModelCatalog({ provider: 'gemini' }), { models: [], error: null });
 });
 
 test('normalizeSlashPrefix trims strips and truncates invalid input', () => {

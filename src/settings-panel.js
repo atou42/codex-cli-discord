@@ -94,6 +94,17 @@ function formatValueLabel(value, fallback, language) {
   return `\`${text}\``;
 }
 
+function formatModelPlaceholder(provider, language) {
+  if (provider === 'claude') {
+    return language === 'en'
+      ? 'e.g. sonnet, opus, claude-sonnet-4-6, default'
+      : '例如 sonnet、opus、claude-sonnet-4-6、default';
+  }
+  return language === 'en'
+    ? 'e.g. gpt-5.4, o3, default'
+    : '例如 gpt-5.4、o3、default';
+}
+
 function hasConfiguredCodexDefault(value, configured) {
   const text = String(value || '').trim();
   return Boolean(configured && text && text !== '(unknown)');
@@ -352,7 +363,7 @@ export function createSettingsPanel({
     const replyDefault = getReplyDeliveryDefault(session);
     const workspace = getWorkspaceBinding(session, key) || { workspaceDir: null, source: 'unset' };
     const effortLevels = getSupportedReasoningEffortLevels(provider);
-    const modelCatalog = normalizeModelCatalog(provider === 'codex' ? getModelCatalog(provider) : { models: [] });
+    const modelCatalog = normalizeModelCatalog(getModelCatalog(provider));
 
     return {
       language,
@@ -744,8 +755,8 @@ function formatOverviewSection(snapshot) {
           : 'Codex profile 决定当前频道向 Codex 传哪个命名 profile。跟随表示继续继承。provider 默认表示不传 `--profile`。';
       case 'model':
         return snapshot.language === 'en'
-          ? 'Choose a model from the Codex CLI catalog, type a custom model, or tune effort here. Provider default clears this channel override.'
-          : '可以从 Codex CLI 读取到的模型里选择，也可以手写模型名。推理力度也放在这里一起调，使用 provider 默认会清掉当前频道覆盖。';
+          ? 'Choose a model from the CLI catalog, type a custom model, or tune effort here. Provider default clears this channel override.'
+          : '可以从 CLI 读取到的模型里选择，也可以手写模型名。推理力度也放在这里一起调，使用 provider 默认会清掉当前频道覆盖。';
       case 'fast':
         return snapshot.language === 'en'
           ? (snapshot.isThread
@@ -831,7 +842,7 @@ function formatOverviewSection(snapshot) {
           snapshot.language === 'en'
             ? `• model: ${formatValueLabel(snapshot.modelValue, '(provider default)', snapshot.language)} (${formatSettingSourceLabel(snapshot.modelSource, snapshot.language)})`
             : `• model：${formatValueLabel(snapshot.modelValue, '（provider 默认）', snapshot.language)}（${formatSettingSourceLabel(snapshot.modelSource, snapshot.language)}）`,
-          snapshot.provider === 'codex' && snapshot.modelCatalog.error
+          snapshot.modelCatalog.error
             ? (snapshot.language === 'en'
               ? `• model catalog: unavailable (${truncateOptionText(snapshot.modelCatalog.error, 120)})`
               : `• 模型列表：暂不可用（${truncateOptionText(snapshot.modelCatalog.error, 120)}）`)
@@ -910,7 +921,7 @@ function formatOverviewSection(snapshot) {
       snapshot.language === 'en'
         ? `• model: ${formatValueLabel(snapshot.modelValue, '(provider default)', snapshot.language)} (${formatSettingSourceLabel(snapshot.modelSource, snapshot.language)})`
         : `• model：${formatValueLabel(snapshot.modelValue, '（provider 默认）', snapshot.language)}（${formatSettingSourceLabel(snapshot.modelSource, snapshot.language)}）`,
-      snapshot.provider === 'codex' && snapshot.modelCatalog.error
+      snapshot.modelCatalog.error
         ? (snapshot.language === 'en'
           ? `• model catalog: unavailable (${truncateOptionText(snapshot.modelCatalog.error, 120)})`
           : `• 模型列表：暂不可用（${truncateOptionText(snapshot.modelCatalog.error, 120)}）`)
@@ -960,8 +971,8 @@ function formatOverviewSection(snapshot) {
         : (language === 'en' ? 'Model name or default' : '模型名或 default'))
       .setStyle(TextInputStyle.Short)
       .setPlaceholder(useGlobalDefault
-        ? (language === 'en' ? 'e.g. gpt-5.4, o3, default' : '例如 gpt-5.4、o3、default')
-        : (language === 'en' ? 'e.g. o3, gpt-5.4, default' : '例如 o3、gpt-5.4、default'))
+        ? formatModelPlaceholder('codex', language)
+        : formatModelPlaceholder(getSessionProvider(session), language))
       .setRequired(true)
       .setMaxLength(120);
     if (useGlobalDefault) {

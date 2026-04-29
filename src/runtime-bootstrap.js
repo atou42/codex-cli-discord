@@ -8,6 +8,7 @@ import { autoRepairProxyEnv } from './proxy-env.js';
 
 const FEATURES_SECTION = 'features';
 const CODEX_MODEL_CATALOG_CACHE = new Map();
+const CLAUDE_MODEL_CATALOG_CACHE = new Map();
 
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -206,6 +207,57 @@ function normalizeCodexModelCatalog(raw) {
   };
 }
 
+function extractClaudeEffortLevels(raw) {
+  const help = String(raw || '');
+  const effortLine = help.split(/\r?\n/).find((line) => /--effort\b/.test(line)) || '';
+  const parenMatch = effortLine.match(/\(([^)]+)\)/);
+  const source = parenMatch?.[1] || '';
+  const seen = new Set();
+  return source
+    .split(/[,/|]/)
+    .map((level) => String(level || '').trim().toLowerCase())
+    .filter((level) => {
+      if (!level || seen.has(level)) return false;
+      seen.add(level);
+      return true;
+    });
+}
+
+function normalizeClaudeModelCatalog(raw) {
+  const help = String(raw || '');
+  const modelHelp = help.split(/\r?\n/)
+    .filter((line) => /--model\b|model/i.test(line))
+    .join('\n');
+  const quoted = [];
+  const seen = new Set();
+  const modelPattern = /\bclaude-(?:sonnet|opus|haiku)-[a-z0-9-]+|\b(?:sonnet|opus|haiku)\b/gi;
+  let match = modelPattern.exec(modelHelp);
+  while (match) {
+    const value = String(match[0] || '').trim();
+    const normalized = value.toLowerCase();
+    if (value && !seen.has(normalized)) {
+      seen.add(normalized);
+      quoted.push(value);
+    }
+    match = modelPattern.exec(modelHelp);
+  }
+
+  const supportedReasoningLevels = extractClaudeEffortLevels(help);
+  return {
+    models: quoted.map((slug) => ({
+      slug,
+      displayName: slug,
+      description: ['sonnet', 'opus', 'haiku'].includes(slug.toLowerCase())
+        ? 'Claude Code model alias from CLI help'
+        : 'Claude Code full model name from CLI help',
+      defaultReasoningLevel: null,
+      supportedReasoningLevels,
+      visibility: 'help',
+    })),
+    error: null,
+  };
+}
+
 export function readCodexModelCatalog({
   codexBin = 'codex',
   env = process.env,
@@ -240,6 +292,61 @@ export function readCodexModelCatalog({
     CODEX_MODEL_CATALOG_CACHE.set(cacheKey, { timestamp: currentTime, catalog });
     return catalog;
   }
+}
+
+export function readClaudeModelCatalog({
+  claudeBin = 'claude',
+  env = process.env,
+  execFileSyncFn = execFileSync,
+  now = Date.now,
+  ttlMs = 5 * 60_000,
+} = {}) {
+  const bin = String(claudeBin || 'claude').trim() || 'claude';
+  const cacheKey = bin;
+  const cached = CLAUDE_MODEL_CATALOG_CACHE.get(cacheKey);
+  const currentTime = typeof now === 'function' ? now() : Date.now();
+  if (cached && currentTime - cached.timestamp < ttlMs) {
+    return cached.catalog;
+  }
+
+  try {
+    const raw = execFileSyncFn(bin, ['--help'], {
+      encoding: 'utf-8',
+      env,
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: 5000,
+    });
+    const catalog = normalizeClaudeModelCatalog(raw);
+    CLAUDE_MODEL_CATALOG_CACHE.set(cacheKey, { timestamp: currentTime, catalog });
+    return catalog;
+  } catch (err) {
+    const message = String(err?.message || err || 'unknown error').trim();
+    const catalog = {
+      models: [],
+      error: message || 'unknown error',
+    };
+    CLAUDE_MODEL_CATALOG_CACHE.set(cacheKey, { timestamp: currentTime, catalog });
+    return catalog;
+  }
+}
+
+export function readProviderModelCatalog({
+  provider = 'codex',
+  codexBin = 'codex',
+  claudeBin = 'claude',
+  env = process.env,
+  execFileSyncFn = execFileSync,
+  now = Date.now,
+  ttlMs = 5 * 60_000,
+} = {}) {
+  const normalized = String(provider || '').trim().toLowerCase();
+  if (normalized === 'codex') {
+    return readCodexModelCatalog({ codexBin, env, execFileSyncFn, now, ttlMs });
+  }
+  if (normalized === 'claude') {
+    return readClaudeModelCatalog({ claudeBin, env, execFileSyncFn, now, ttlMs });
+  }
+  return { models: [], error: null };
 }
 
 export function writeCodexDefaults({

@@ -595,6 +595,48 @@ test('createSettingsPanel exposes a compact model-only panel', () => {
   assert.ok(labels.includes('关闭'));
 });
 
+test('createSettingsPanel reads Claude model catalog and keeps custom model control', () => {
+  const session = {
+    provider: 'claude',
+    language: 'zh',
+    mode: 'safe',
+    model: 'sonnet',
+    effort: 'high',
+  };
+  const panel = createPanel({
+    session,
+    modelCatalog: {
+      models: [
+        { slug: 'sonnet', displayName: 'sonnet' },
+        { slug: 'opus', displayName: 'opus' },
+        { slug: 'claude-sonnet-4-6', displayName: 'claude-sonnet-4-6' },
+      ],
+      error: null,
+    },
+  });
+
+  const payload = panel.openModelSettingsPanel({
+    key: 'thread-1',
+    session,
+    userId: '12345',
+  });
+
+  const modelSelect = payload.components[0].components[0];
+  assert.deepEqual(modelSelect.data.options.map((option) => option.value), [
+    'default',
+    'sonnet',
+    'opus',
+    'claude-sonnet-4-6',
+  ]);
+  assert.equal(modelSelect.data.options.find((option) => option.value === 'sonnet').default, true);
+  const labels = payload.components.flatMap((row) => row.components.map((component) => component.data.label));
+  assert.ok(labels.includes('手写模型名'));
+  assert.ok(labels.includes('high'));
+  assert.ok(labels.includes('medium'));
+  assert.ok(labels.includes('low'));
+  assert.ok(!labels.includes('xhigh'));
+});
+
 test('createSettingsPanel applies model catalog selection and stays in model section', async () => {
   const session = {
     provider: 'codex',
@@ -744,6 +786,35 @@ test('createSettingsPanel opens a model modal from the model section', async () 
   assert.equal(modals[0].data.customId, 'stgm:model:12345');
   assert.equal(modals[0].data.components[0].components[0].data.customId, 'model_name');
   assert.equal(modals[0].data.components[0].components[0].data.value, 'gpt-5.4');
+});
+
+test('createSettingsPanel uses Claude examples in Claude model modal', async () => {
+  const session = {
+    provider: 'claude',
+    language: 'zh',
+    mode: 'safe',
+  };
+  const modals = [];
+  const panel = createPanel({ session });
+
+  await panel.handleSettingsPanelInteraction({
+    customId: 'stg:act:quick_model:custom:12345',
+    channelId: 'thread-1',
+    user: { id: '12345' },
+    async update() {
+      throw new Error('should not update');
+    },
+    async reply() {
+      throw new Error('should not reply');
+    },
+    async showModal(modal) {
+      modals.push(modal);
+    },
+  });
+
+  assert.equal(modals.length, 1);
+  assert.match(modals[0].data.components[0].components[0].data.placeholder, /sonnet/);
+  assert.doesNotMatch(modals[0].data.components[0].components[0].data.placeholder, /gpt-5\.4/);
 });
 
 test('createSettingsPanel opens a global default model modal from the defaults section', async () => {
