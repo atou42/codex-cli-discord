@@ -535,6 +535,54 @@ test('createSessionCommandActions.bindSession rejects strict-provider sessions w
   assert.equal(saveCount, 1);
 });
 
+test('createSessionCommandActions.bindForkedSession records fork metadata without displacing parent', () => {
+  let saveCount = 0;
+  const parentSession = { provider: 'codex', runnerSessionId: 'parent-1', codexThreadId: 'parent-1' };
+  const childSession = { provider: 'codex', runnerSessionId: null, codexThreadId: null };
+  const actions = createSessionCommandActions({
+    saveDb: () => {
+      saveCount += 1;
+    },
+    ensureWorkspace: () => '/legacy/thread-a',
+    listStoredSessions: () => [
+      { key: 'parent-channel', session: parentSession },
+      { key: 'child-channel', session: childSession },
+    ],
+    clearSessionId: (session) => {
+      session.runnerSessionId = null;
+      session.codexThreadId = null;
+    },
+    getSessionId: (session) => session.runnerSessionId,
+    setSessionId: (session, value) => {
+      session.runnerSessionId = value;
+      session.codexThreadId = value;
+    },
+    getSessionProvider: (session) => session.provider || 'codex',
+    getProviderShortName: () => 'Codex',
+    resolveTimeoutSetting: () => ({ timeoutMs: 60000, source: 'session override' }),
+    listRecentSessions: () => [],
+    humanAge: () => '0s',
+  });
+
+  const result = actions.bindForkedSession(childSession, {
+    sessionId: 'fork-1',
+    parentSessionId: 'parent-1',
+    parentChannelId: 'parent-channel',
+    provider: 'codex',
+  });
+
+  assert.equal(result.sessionId, 'fork-1');
+  assert.equal(result.parentSessionId, 'parent-1');
+  assert.equal(parentSession.runnerSessionId, 'parent-1');
+  assert.equal(childSession.runnerSessionId, 'fork-1');
+  assert.equal(childSession.codexThreadId, 'fork-1');
+  assert.equal(childSession.forkedFromProvider, 'codex');
+  assert.equal(childSession.forkedFromSessionId, 'parent-1');
+  assert.equal(childSession.forkedFromChannelId, 'parent-channel');
+  assert.match(childSession.forkedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(saveCount, 1);
+});
+
 test('createSessionCommandActions.formatRecentSessionsReport renders resume hint and items', () => {
   const actions = createSessionCommandActions({
     saveDb: () => {},

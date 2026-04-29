@@ -183,6 +183,105 @@ test('createTextCommandHandler shows current provider-native resume alias', asyn
   assert.doesNotMatch(replies[0], /!project_resume/);
 });
 
+test('createTextCommandHandler creates native Codex fork from text command', async () => {
+  const replies = [];
+  const parentSession = { provider: 'codex', language: 'zh', runnerSessionId: 'parent-1' };
+  const childSession = { provider: 'codex', language: 'zh' };
+  const childThread = {
+    id: 'fork-channel-1',
+    async join() {},
+    async send() {},
+  };
+  const threadCreates = [];
+  const queuedPrompts = [];
+  const handleCommand = createTextCommandHandler({
+    getSession: (key) => (key === 'fork-channel-1' ? childSession : parentSession),
+    getSessionId: (currentSession) => currentSession?.runnerSessionId || null,
+    getSessionProvider: (currentSession) => currentSession.provider,
+    getSessionLanguage: () => 'zh',
+    getProviderDisplayName: () => 'Codex CLI',
+    getRuntimeSnapshot: () => ({ running: false, queued: 0 }),
+    commandActions: {
+      bindForkedSession(currentSession, binding) {
+        currentSession.runnerSessionId = binding.sessionId;
+        currentSession.forkedFromSessionId = binding.parentSessionId;
+        return binding;
+      },
+    },
+    async forkCodexThread(options) {
+      assert.deepEqual(options, { threadId: 'parent-1' });
+      return { threadId: 'fork-session-1' };
+    },
+    async enqueuePrompt(_message, key, content) {
+      queuedPrompts.push({ key, content });
+      return { ok: true, enqueued: true, queuedAhead: 0 };
+    },
+    resolveSecurityContext: () => ({ profile: 'team' }),
+    safeReply: async (_message, payload) => {
+      replies.push(payload);
+    },
+  });
+
+  await handleCommand({
+    id: 'message-1',
+    author: { id: 'user-1' },
+    channel: {
+      id: 'channel-1',
+      threads: {
+        async create(options) {
+          threadCreates.push(options);
+          return childThread;
+        },
+      },
+    },
+  }, 'channel-1', '!fork continue here');
+
+  assert.equal(parentSession.runnerSessionId, 'parent-1');
+  assert.equal(childSession.runnerSessionId, 'fork-session-1');
+  assert.equal(childSession.forkedFromSessionId, 'parent-1');
+  assert.equal(threadCreates.length, 1);
+  assert.deepEqual(queuedPrompts, [{ key: 'fork-channel-1', content: 'continue here' }]);
+  assert.match(replies[0], /已创建 Codex fork：<#fork-channel-1>/);
+});
+
+test('createTextCommandHandler rejects fork for non-codex providers', async () => {
+  const replies = [];
+  const session = { provider: 'claude', language: 'zh' };
+  const handleCommand = createTextCommandHandler({
+    getSession: () => session,
+    getSessionProvider: (currentSession) => currentSession.provider,
+    getSessionLanguage: () => 'zh',
+    getProviderDisplayName: () => 'Claude Code',
+    async forkCodexThread() {
+      throw new Error('should not fork');
+    },
+    safeReply: async (_message, payload) => {
+      replies.push(payload);
+    },
+  });
+
+  await handleCommand(createMessage(), 'thread-1', '!fork');
+
+  assert.match(replies[0], /原生 fork 只支持 Codex/);
+});
+
+test('createTextCommandHandler shows Claude model examples on Claude provider', async () => {
+  const replies = [];
+  const session = { provider: 'claude', language: 'zh' };
+  const handleCommand = createTextCommandHandler({
+    getSession: () => session,
+    getSessionProvider: (currentSession) => currentSession.provider,
+    safeReply: async (_message, payload) => {
+      replies.push(payload);
+    },
+  });
+
+  await handleCommand(createMessage(), 'thread-1', '!model');
+
+  assert.match(replies[0], /sonnet/);
+  assert.doesNotMatch(replies[0], /gpt-5\.3-codex/);
+});
+
 test('createTextCommandHandler accepts !c as cancel alias', async () => {
   const replies = [];
   const cancelCalls = [];

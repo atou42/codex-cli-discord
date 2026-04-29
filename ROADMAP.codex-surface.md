@@ -78,7 +78,7 @@ Keep one important boundary clear. In Discord, these settings apply to the next 
 
 After the explicit controls land, keep `safe` and `dangerous` only as compatibility shims or remove them entirely, depending on migration cost.
 
-## Phase 4: Introduce Plan-First Workflow
+## Phase 4: Plan-First Workflow (On Hold)
 
 ### Goal
 
@@ -92,13 +92,9 @@ Discord is a better home for plan-first than the terminal. It can show the plan 
 
 ### Plan
 
-Add three task entry styles for Codex. The first is direct execution, which preserves today's behavior. The second is plan only, which returns a plan and stops. The third is plan then execute, which produces a plan first and only starts execution after confirmation.
+This phase is intentionally on hold while fork is being clarified. The product shape for plan-first depends on the fork model, especially around whether execution should branch from the planning context or start from a separate clean path.
 
-Keep the first version product-level rather than trying to mimic the terminal UI exactly. The plan step should run as its own Codex task with explicit instructions not to mutate files. The execute step should then run as a second task that takes the approved plan as input.
-
-Once Codex profile support exists, allow the plan stage to use a different profile or reasoning level from the execution stage.
-
-Make the plan visible in the thread and in the progress card. Users should be able to tell whether the current run is planning, waiting for confirmation, or already executing.
+Do not implement this phase until the fork contract is stable. Keep the requirement visible, but treat it as blocked by Phase 5 design work.
 
 ## Phase 5: Add Fork as a Product-Level Branch
 
@@ -124,9 +120,9 @@ Revisit protocol-level fork later only if the current product-level approach pro
 
 ## Delivery Order
 
-The recommended order is profile first, then review, then execution controls, then plan-first, then fork.
+The recommended order is profile first, then review, then execution controls, then fork. Plan-first remains on hold until the fork design is settled.
 
-That order keeps the roadmap grounded in leverage. Profile makes hidden behavior visible. Review is a fast win. Execution controls make autonomy legible. Plan-first improves long-task quality. Fork becomes much more useful once plan-first exists.
+That order keeps the roadmap grounded in leverage. Profile makes hidden behavior visible. Review is a fast win. Execution controls make autonomy legible. Fork can now be designed as its own product surface instead of being forced to inherit an unfinished plan model.
 
 ## Definition of Done
 

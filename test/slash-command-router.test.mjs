@@ -248,6 +248,119 @@ test('createSlashCommandRouter model command can update model and effort togethe
   assert.deepEqual(state.getCloseRuntimeCalls(), [{ key: 'channel-1', reason: 'runtime config changed' }]);
 });
 
+test('createSlashCommandRouter creates native Codex fork in a new thread and preserves parent binding', async () => {
+  const parentSession = { provider: 'codex', language: 'zh', runnerSessionId: 'parent-1' };
+  const childSession = { provider: 'codex', language: 'zh' };
+  const threadCreates = [];
+  const queuedPrompts = [];
+  const childThread = {
+    id: 'fork-channel-1',
+    name: 'fork',
+    async join() {},
+    async send(payload) {
+      queuedPrompts.push({ kind: 'send', payload });
+    },
+  };
+  const state = createRouterState({
+    getSession(key) {
+      return key === 'fork-channel-1' ? childSession : parentSession;
+    },
+    getSessionId: (currentSession) => currentSession?.runnerSessionId || null,
+    getRuntimeSnapshot: () => ({ running: false, queued: 0 }),
+    commandActions: {
+      bindForkedSession(currentSession, binding) {
+        currentSession.runnerSessionId = binding.sessionId;
+        currentSession.forkedFromSessionId = binding.parentSessionId;
+        currentSession.forkedFromChannelId = binding.parentChannelId;
+        currentSession.forkedFromProvider = binding.provider;
+        return binding;
+      },
+    },
+    async forkCodexThread(options) {
+      assert.deepEqual(options, { threadId: 'parent-1' });
+      return { threadId: 'fork-session-1', forkedFromId: 'parent-1' };
+    },
+    async enqueuePrompt(message, key, content, securityContext) {
+      queuedPrompts.push({ message, key, content, securityContext });
+      return { ok: true, enqueued: true, queuedAhead: 0 };
+    },
+    resolveSecurityContext: () => ({ profile: 'team' }),
+  });
+  const interaction = createInteraction('cx_fork', { prompt: 'continue on the branch' });
+  interaction.channel = {
+    id: 'channel-1',
+    threads: {
+      async create(options) {
+        threadCreates.push(options);
+        return childThread;
+      },
+    },
+  };
+
+  const handled = await state.router({
+    interaction,
+    commandName: 'fork',
+    respond: async (payload) => {
+      state.replies.push(payload);
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.equal(parentSession.runnerSessionId, 'parent-1');
+  assert.equal(childSession.runnerSessionId, 'fork-session-1');
+  assert.equal(childSession.forkedFromSessionId, 'parent-1');
+  assert.equal(childSession.forkedFromChannelId, 'channel-1');
+  assert.equal(threadCreates.length, 1);
+  assert.match(threadCreates[0].name, /codex fork/);
+  assert.equal(queuedPrompts.length, 1);
+  assert.equal(queuedPrompts[0].key, 'fork-channel-1');
+  assert.equal(queuedPrompts[0].content, 'continue on the branch');
+  assert.deepEqual(queuedPrompts[0].securityContext, { profile: 'team' });
+  assert.match(state.replies[0].content, /已创建 Codex fork：<#fork-channel-1>/);
+  assert.match(state.replies[0].content, /fork-session-1/);
+});
+
+test('createSlashCommandRouter refuses Codex fork while parent is running', async () => {
+  const state = createRouterState({
+    getSessionId: () => 'parent-1',
+    getRuntimeSnapshot: () => ({ running: true, queued: 0 }),
+    async forkCodexThread() {
+      throw new Error('should not fork');
+    },
+  });
+
+  const handled = await state.router({
+    interaction: createInteraction('cx_fork'),
+    commandName: 'fork',
+    respond: async (payload) => {
+      state.replies.push(payload);
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.equal(state.replies[0].content, '⏳ 父频道正在运行任务，等这轮结束后再 fork。');
+});
+
+test('createSlashCommandRouter rejects fork for non-codex providers', async () => {
+  const state = createRouterState({
+    async forkCodexThread() {
+      throw new Error('should not fork');
+    },
+  });
+  state.session.provider = 'claude';
+
+  const handled = await state.router({
+    interaction: createInteraction('cx_fork'),
+    commandName: 'fork',
+    respond: async (payload) => {
+      state.replies.push(payload);
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.match(state.replies[0].content, /原生 fork 只支持 Codex/);
+});
+
 test('createSlashCommandRouter routes abort alias to cancel handler', async () => {
   const state = createRouterState();
 

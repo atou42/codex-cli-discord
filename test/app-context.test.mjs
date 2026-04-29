@@ -255,8 +255,13 @@ test('createAppContext wires factories and cross-links composition dependencies'
   assert.equal(typeof calls.commandSurface.workspaceBrowserOptions.resolveChildThreadWorkspaceMode, 'function');
   assert.equal(typeof calls.commandSurface.workspaceBrowserOptions.setChildThreadWorkspaceMode, 'function');
   assert.equal(calls.commandSurface.slashRouterOptions.cancelChannelWork, promptRuntime.cancelChannelWork);
+  assert.equal(calls.commandSurface.slashRouterOptions.enqueuePrompt, promptRuntime.enqueuePrompt);
+  assert.equal(calls.commandSurface.slashRouterOptions.getSessionId, identity.getSessionId);
   assert.equal(calls.commandSurface.slashRouterOptions.retryLastPrompt, promptRuntime.retryLastPrompt);
   assert.equal(calls.commandSurface.textCommandOptions.cancelChannelWork, promptRuntime.cancelChannelWork);
+  assert.equal(calls.commandSurface.textCommandOptions.enqueuePrompt, promptRuntime.enqueuePrompt);
+  assert.equal(calls.commandSurface.textCommandOptions.getRuntimeSnapshot, promptRuntime.getRuntimeSnapshot);
+  assert.equal(calls.commandSurface.textCommandOptions.resolveSecurityContext, securityPolicy.resolveSecurityContext);
   assert.equal(calls.entryHandlers.enqueuePrompt, promptRuntime.enqueuePrompt);
   assert.equal(calls.entryHandlers.routeSlashCommand, commandSurface.routeSlashCommand);
   assert.equal(calls.lifecycle.bindClientHandlers, entryHandlers.bindClientHandlers);
