@@ -151,6 +151,49 @@ test('Claude long runner surfaces result errors instead of treating them as succ
   assert.equal(result.threadId, 'sess-error');
 });
 
+test('Claude long runner keeps API retry details for final errors', async () => {
+  const fake = createFakeSpawn();
+  const runner = createClaudeLongRunner({
+    spawnFn: fake.spawnFn,
+    getProviderBin: () => 'claude',
+    getSessionId: () => 'sess-rate-limit',
+    resolveModelSetting: () => ({ value: null }),
+    resolveReasoningEffortSetting: () => ({ value: null }),
+    resolveTimeoutSetting: () => ({ timeoutMs: 0 }),
+    normalizeTimeoutMs: (value) => Number(value || 0),
+    stopChildProcess: (child) => child.kill('SIGTERM'),
+    log: () => {},
+  });
+
+  const task = runner.runTask({
+    session: { provider: 'claude', mode: 'safe', runnerSessionId: 'sess-rate-limit' },
+    sessionKey: 'thread-rate-limit',
+    workspaceDir: '/tmp/workspace-rate-limit',
+    prompt: 'fail',
+  });
+  emitEvent(fake.children[0], {
+    type: 'system',
+    subtype: 'api_retry',
+    error_status: 429,
+    error: 'rate_limit',
+    attempt: 7,
+    max_retries: 10,
+    retry_delay_ms: 39083.4,
+    session_id: 'sess-rate-limit',
+  });
+  emitEvent(fake.children[0], {
+    type: 'result',
+    session_id: 'sess-rate-limit',
+    is_error: true,
+  });
+  const result = await task;
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /status=429/);
+  assert.match(result.error, /error=rate_limit/);
+  assert.match(result.logs.join('\n'), /attempt=7/);
+});
+
 test('Claude long runner releases idle processes and resumes the saved session after reheating', async () => {
   const fake = createFakeSpawn();
   const runner = createClaudeLongRunner({

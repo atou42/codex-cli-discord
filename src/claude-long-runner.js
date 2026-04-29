@@ -120,6 +120,24 @@ function formatArgs(args) {
   return JSON.stringify(args);
 }
 
+function formatClaudeApiRetry(event) {
+  if (event?.type !== 'system' || event?.subtype !== 'api_retry') return '';
+  const status = event.error_status || event.status || '';
+  const error = String(event.error || event.message || '').trim();
+  const attempt = event.attempt ?? null;
+  const maxRetries = event.max_retries ?? event.maxRetries ?? null;
+  const retryMs = event.retry_delay_ms ?? event.retryDelayMs ?? null;
+  const parts = [
+    'Claude API retry',
+    status ? `status=${status}` : null,
+    error ? `error=${error}` : null,
+    attempt !== null ? `attempt=${attempt}` : null,
+    maxRetries !== null ? `maxRetries=${maxRetries}` : null,
+    retryMs !== null ? `retryDelayMs=${Math.round(Number(retryMs) || 0)}` : null,
+  ].filter(Boolean);
+  return parts.join(' ');
+}
+
 function logClaudeLongEvent(log, event, fields = {}) {
   if (typeof log !== 'function') return;
   const detail = Object.entries(fields)
@@ -249,6 +267,12 @@ export function createClaudeLongRunner({
 
       if (!turn) return;
 
+      const retryLog = formatClaudeApiRetry(event);
+      if (retryLog) {
+        turn.logs.push(retryLog);
+        return;
+      }
+
       if (event.type === 'assistant') {
         const text = extractClaudeText(event);
         if (text) turn.responseText += `${turn.responseText ? '\n\n' : ''}${text}`;
@@ -279,7 +303,7 @@ export function createClaudeLongRunner({
         ok: !event.is_error,
         cancelled: Boolean(turn.wasCancelled?.()),
         timedOut: false,
-        error: event.is_error ? (errors || resultText || 'Claude long runner returned an error') : '',
+        error: event.is_error ? (errors || resultText || turn.logs.at(-1) || 'Claude long runner returned an error') : '',
         logs: turn.logs,
         messages: turn.messages,
         finalAnswerMessages: turn.finalAnswerMessages,
